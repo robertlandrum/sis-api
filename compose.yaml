@@ -53,11 +53,7 @@ services:
     # Mirrors the Dockerfile HEALTHCHECK; podman ignores HEALTHCHECK baked into
     # OCI images, so declare it here too for engine-agnostic behavior.
     healthcheck:
-      test:
-        - "CMD"
-        - "node"
-        - "-e"
-        - "require('http').request({host:'127.0.0.1',port:3000,method:'HEAD',path:'/'},function(r){process.exit(r.statusCode===200?0:1)}).on('error',function(){process.exit(1)}).end()"
+      test: ["CMD", "node", "scripts/healthcheck.js"]
       interval: 30s
       timeout: 5s
       retries: 3

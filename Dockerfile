@@ -41,8 +41,9 @@ EXPOSE 3000
 STOPSIGNAL SIGINT
 
 # The server only starts listening once Mongo is connected and routes are
-# mounted, so a 200 on HEAD / is a true readiness signal.
+# mounted, so a 200 on HEAD / is a true readiness signal.  The script follows
+# server.port and server.tls, so it keeps working when HTTPS is enabled.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "require('http').request({host:'127.0.0.1',port:3000,method:'HEAD',path:'/'},function(r){process.exit(r.statusCode===200?0:1)}).on('error',function(){process.exit(1)}).end()"
+  CMD ["node", "scripts/healthcheck.js"]
 
 CMD ["node", "server.js"]
