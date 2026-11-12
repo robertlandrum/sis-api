@@ -1,9 +1,12 @@
 "use strict";
 
 var express = require('express');
+var http = require('http');
+var https = require('https');
 var mongoose = require('mongoose');
 var logger = require('./util/logger');
 var nconf = require("nconf");
+var tlsConfig = require("./util/tls-config");
 var app = null;
 
 // routes we want to include
@@ -42,6 +45,14 @@ var createSessionManager = function(appConfig, logger) {
         requireSigningKey : !appConfig[SIS.OPT_READONLY],
         logger : logger
     });
+};
+
+// Load the TLS cert and key.  Returns null when server.tls is disabled and
+// throws if it is enabled and the files are missing or invalid.
+var loadTlsOptions = function(serverConfig, logger) {
+    var SIS = require("./util/constants");
+    serverConfig = serverConfig || { };
+    return tlsConfig.loadTlsOptions(serverConfig[SIS.OPT_TLS], { logger : logger });
 };
 
 var startServer = function(callback) {
@@ -101,6 +112,8 @@ var startServer = function(callback) {
     // fail fast on invalid settings before touching the database
     validateAppConfig(nconf.get('app'));
     var sessionManager = createSessionManager(nconf.get('app'), LOGGER);
+    var serverConfig = nconf.get('server') || { };
+    var tlsOptions = loadTlsOptions(serverConfig, LOGGER);
 
     var opts = nconf.get('db').opts || { };
 
@@ -154,7 +167,16 @@ var startServer = function(callback) {
             });
 
             // listen
-            var httpServer = app.listen(nconf.get('server').port, function(err) {
+            var httpServer = tlsOptions ? https.createServer(tlsOptions, app)
+                                        : http.createServer(app);
+            httpServer.on("error", function(err) {
+                LOGGER.fatal({ err : err }, "Server error");
+                process.exit(1);
+            });
+            httpServer.listen(serverConfig.port, serverConfig.address, function() {
+                var addr = httpServer.address();
+                LOGGER.info({ address : addr.address, port : addr.port, tls : !!tlsOptions },
+                            "Listening");
                 httpServer.on("close", function() {
                     app.locals.closeListeners.forEach(function(handler) {
                         handler();
@@ -183,9 +205,11 @@ function main() {
 
     // Check the config once, before forking, so a bad setting exits with a
     // clear message instead of crashing (and re-forking) every worker.
+    var tlsEnabled = false;
     try {
         validateAppConfig(nconf.get('app'));
         createSessionManager(nconf.get('app'));
+        tlsEnabled = !!loadTlsOptions(nconf.get('server'));
     } catch (ex) {
         LOGGER.fatal(ex.message);
         process.exit(1);
@@ -204,6 +228,19 @@ function main() {
                 process.exit(0);
             });
         });
+
+        // SIGHUP re-reads the TLS cert and key (e.g. after renewal) without
+        // dropping connections.  A bad cert is logged and the old one kept.
+        if (server instanceof https.Server) {
+            process.on("SIGHUP", function() {
+                try {
+                    server.setSecureContext(loadTlsOptions(nconf.get('server'), LOGGER));
+                    LOGGER.info("Reloaded TLS certificate");
+                } catch (ex) {
+                    LOGGER.error({ err : ex }, "TLS reload failed; keeping the current certificate");
+                }
+            });
+        }
     };
 
     if (nconf.get("app:use_cluster")) {
@@ -221,6 +258,14 @@ function main() {
                 LOGGER.error({ worker_pid : worker.process.pid }, 'worker died. forking again.');
                 cluster.fork();
             });
+            // workers reload their own TLS cert; pass SIGHUP on to them
+            if (tlsEnabled) {
+                process.on("SIGHUP", function() {
+                    Object.keys(cluster.workers).forEach(function(id) {
+                        cluster.workers[id].process.kill("SIGHUP");
+                    });
+                });
+            }
         } else {
             startServer(setupCloseHandlers);
         }
@@ -239,6 +284,7 @@ module.exports.mongoose = mongoose;
 module.exports.startServer = startServer;
 module.exports.validateAppConfig = validateAppConfig;
 module.exports.createSessionManager = createSessionManager;
+module.exports.loadTlsOptions = loadTlsOptions;
 module.exports.stopServer = function(server, callback) {
     server.close(callback);
 };

@@ -5,6 +5,7 @@ Table of Contents
 - [Requirements](#requirements)
 - [Building and Testing](#building-and-testing)
 - [Configuration](#configuration)
+    - [TLS (HTTPS)](#tls-https)
     - [Authentication Backends](#authentication-backends)
         -[Default Backend](#default-backend-configuration)
         -[Active Directory over LDAP](#active-directory-over-ldap)
@@ -116,7 +117,23 @@ An annotated `config.json` looks like:
     // server specific config
     "server" : {
         // the tcp port to listen on
-        "port" : 3000
+        "port" : 3000,
+        // optional address to bind to.  Defaults to all interfaces
+        "address" : "0.0.0.0",
+        // optional HTTPS listener.  See "TLS (HTTPS)" below
+        "tls" : {
+            // serve HTTPS instead of HTTP.  Defaults to false
+            "enabled" : false,
+            // PEM certificate (followed by any intermediates) and private key,
+            // relative to conf/ unless absolute.  Default to keys/tls.crt and
+            // keys/tls.key (conf/keys)
+            "cert" : "keys/tls.crt",
+            "key" : "keys/tls.key",
+            // passphrase for an encrypted private key.  Optional
+            "passphrase" : "...",
+            // oldest protocol accepted.  Defaults to "TLSv1.2"
+            "min_version" : "TLSv1.2"
+        }
     },
     // application specific settings
     "app" : {
@@ -169,6 +186,51 @@ An annotated `config.json` looks like:
     },
 }
 ```
+
+## TLS (HTTPS)
+
+SIS serves plain HTTP by default. To serve HTTPS instead, put a certificate and
+its private key next to the configuration and set `server.tls.enabled`:
+
+```
+conf/
+  config.json
+  keys/
+    tls.crt   (PEM certificate, followed by any intermediate certificates)
+    tls.key   (PEM private key, mode 0600, git-ignored)
+```
+
+```javascript
+"server" : {
+    "port" : 3443,
+    "tls" : { "enabled" : true }
+}
+```
+
+or, without editing files, `server__tls__enabled=true`. The server listens on
+HTTPS only (it does not also serve or redirect plain HTTP on another port).
+
+For local development, create a self-signed certificate with:
+
+```bash
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+  -days 365 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+  -keyout conf/keys/tls.key -out conf/keys/tls.crt
+chmod 600 conf/keys/tls.key
+curl --cacert conf/keys/tls.crt https://localhost:3000/api/v1.1/info
+```
+
+The server refuses to start when TLS is enabled and the certificate or key is
+missing, unreadable, or not a matching pair. It logs a warning if the key is
+readable by group or others, or if the certificate has expired.
+
+To install a renewed certificate without a restart, replace the files and send
+the server `SIGHUP` (in cluster mode, send it to the primary process; it
+forwards it to the workers). Open connections are kept. If the new files are
+invalid, the error is logged and the server keeps using the old certificate.
+
+If TLS is terminated by a load balancer or reverse proxy in front of SIS, leave
+`server.tls` disabled.
 
 ## Authentication Backends
 
@@ -321,6 +383,10 @@ Once up, the API listens on `http://localhost:3000`:
 curl -I http://localhost:3000/            # -> 200
 curl http://localhost:3000/api/v1.1/info  # -> build/version info
 ```
+
+To serve HTTPS from the container, put `tls.crt` and `tls.key` in the same
+`/app/conf/keys` volume (or bind mount) and set `server__tls__enabled: "true"`;
+the healthcheck (`scripts/healthcheck.js`) switches to HTTPS on its own.
 
 The signing keys live next to the config at `/app/conf/keys`, stored in the
 named `sis_keys` volume (mounted read-only into `sis-api`). `conf/keys/` is

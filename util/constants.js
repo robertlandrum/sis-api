@@ -118,6 +118,8 @@ module.exports = {
     // JWT session settings (app.jwt)
     OPT_JWT : "jwt",
     OPT_SESSION_MGR : "session_manager",
+    // HTTPS listener settings (server.tls)
+    OPT_TLS : "tls",
 
     // supported versions
     SUPPORTED_VERSIONS : ["v1.1"],
@@ -142,6 +144,9 @@ module.exports = {
     JWT_DEFAULT_KID : "default",
     JWT_DEFAULT_KEYS_DIR : "keys",
     JWT_DEFAULT_ISSUER : "sis",
+    TLS_DEFAULT_CERT : "keys/tls.crt",
+    TLS_DEFAULT_KEY : "keys/tls.key",
+    TLS_DEFAULT_MIN_VERSION : "TLSv1.2",
     JWT_AUDIENCE : "sis-api",
     JWT_ALGORITHM : "EdDSA",
     JWT_CLOCK_TOLERANCE_SEC : 30,
