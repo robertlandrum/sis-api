@@ -292,4 +292,78 @@ describe('HookManager', function() {
             });
         });
     });
+
+    describe('dispatch', function() {
+        var receiver = null;
+        var attempts = 0;
+        var failuresLeft = 0;
+
+        before(function(done) {
+            var express = require('express');
+            var app = express();
+            app.use(express.json());
+            app.post('/hook', function(req, res) {
+                attempts++;
+                if (failuresLeft > 0) {
+                    failuresLeft--;
+                    return res.status(503).send("busy");
+                }
+                res.send("got " + req.body.event);
+            });
+            receiver = app.listen(3337, done);
+        });
+
+        after(function(done) {
+            receiver.close(done);
+        });
+
+        async function addHook(name, url, retries) {
+            await hookManager.add({
+                name : name,
+                _sis : { owner : ["Test"] },
+                entity_type : "dispatch_type_" + name,
+                target : { action : "POST", url : url },
+                events : [SIS.EVENT_INSERT],
+                retry_count : retries,
+                retry_delay : 1
+            });
+            return "dispatch_type_" + name;
+        }
+
+        beforeEach(function() {
+            attempts = 0;
+            failuresLeft = 0;
+        });
+
+        it("resolves with what the hooks answered", async function() {
+            var type = await addHook("dispatch_ok", "http://127.0.0.1:3337/hook", 0);
+            (await hookManager.dispatchHooks({ name : "e" }, type, SIS.EVENT_INSERT, false)).should.eql(["got insert"]);
+            attempts.should.eql(1);
+        });
+
+        it("retries a hook that fails", async function() {
+            var type = await addHook("dispatch_retry", "http://127.0.0.1:3337/hook", 2);
+            failuresLeft = 1;
+            (await hookManager.dispatchHooks({ name : "e" }, type, SIS.EVENT_INSERT, false)).should.eql(["got insert"]);
+            attempts.should.eql(2);
+        });
+
+        it("resolves with null once the retries are used up", async function() {
+            var type = await addHook("dispatch_fail", "http://127.0.0.1:3337/hook", 1);
+            failuresLeft = 5;
+            should(await hookManager.dispatchHooks({ name : "e" }, type, SIS.EVENT_INSERT, false)).be.null();
+            attempts.should.eql(2);
+        });
+
+        it("resolves with nothing for types without hooks", async function() {
+            (await hookManager.dispatchHooks({ name : "e" }, "no_hooks_here", SIS.EVENT_INSERT, false)).should.eql([]);
+        });
+
+        it("tracks the hook lookups that are running", async function() {
+            var lookupsDone = require('../util/hook-manager').lookupsDone;
+            var dispatch = hookManager.dispatchHooks({ name : "e" }, "no_hooks_here", SIS.EVENT_INSERT, false);
+            await lookupsDone();
+            await dispatch;
+        });
+    });
 });

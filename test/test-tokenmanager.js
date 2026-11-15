@@ -169,4 +169,117 @@ describe('Token Manager', function() {
         });
     });
 
+    describe("edge cases", function() {
+        var expectError = TestUtil.expectError;
+        var userManager = null;
+        var owner = { name : "token_owner", email : "token_owner@test.com", pw : "token_owner",
+                      roles : { test_g1 : "user" } };
+
+        before(async function() {
+            userManager = schemaManager.auth[SIS.SCHEMA_USERS];
+            await userManager.add(owner, { user : users.superman });
+        });
+
+        after(async function() {
+            await userManager.delete(owner.name, { user : users.superman });
+        });
+
+        it("only gets the tokens of its user", async function() {
+            var token = await schemaManager.getTokenManagerForUser(owner.name)
+                .add({ desc : "mine" }, { user : users.superman });
+            var other = schemaManager.getTokenManagerForUser("admin1");
+            await expectError(other.getById(token.name), 404, /Token for admin1/);
+            var mine = await schemaManager.getTokenManagerForUser(owner.name).getById(token.name);
+            mine.desc.should.eql("mine");
+            (await schemaManager.tokenFetcher.getTokenByName(token.name)).username.should.eql(owner.name);
+        });
+
+        it("rejects tokens for no user or another user", async function() {
+            await expectError(schemaManager.tokenFetcher.add({ desc : "x" }, { user : users.superman }),
+                              400, /invalid user/);
+            await expectError(schemaManager.getTokenManagerForUser(owner.name)
+                              .add({ username : "admin1" }, { user : users.superman }),
+                              400, /must belong to token_owner/);
+        });
+
+        it("retries a token name that is taken", async function() {
+            var crypto = require("crypto");
+            var tokenManager = schemaManager.getTokenManagerForUser(owner.name);
+            // the unique index on the token name is rebuilt in the background
+            // after earlier specs drop the database - wait for it
+            await schemaManager.indexesReady(tokenManager.model);
+            await tokenManager.model.createIndexes();
+            var first = await tokenManager.add({ desc : "first" }, { user : users.superman });
+            var original = crypto.randomBytes;
+            var calls = 0;
+            crypto.randomBytes = function(n) {
+                calls++;
+                // the first name generated is the one already taken
+                return calls === 1 ? Buffer.from(first.name, "hex") : original.call(crypto, n);
+            };
+            var second;
+            try {
+                second = await tokenManager.add({ desc : "second" }, { user : users.superman });
+            } finally {
+                crypto.randomBytes = original;
+            }
+            calls.should.eql(2);
+            second.name.should.not.eql(first.name);
+        });
+
+        describe("authorize", function() {
+            var tokenManager = null;
+            before(function() {
+                tokenManager = schemaManager.getTokenManagerForUser(owner.name);
+            });
+
+            it("requires a username", async function() {
+                await expectError(tokenManager.authorize(SIS.EVENT_INSERT, {}, users.superman), 400, /Missing username/);
+            });
+
+            it("does not change the username", async function() {
+                await expectError(tokenManager.authorize(SIS.EVENT_UPDATE, { username : owner.name },
+                                                         users.superman, { username : "admin1" }),
+                                  400, /Cannot change the username/);
+            });
+
+            it("does not change temporary tokens", async function() {
+                var doc = { username : owner.name };
+                await expectError(tokenManager.authorize(SIS.EVENT_UPDATE, doc, users.superman,
+                                                         { username : owner.name, expires : new Date() }),
+                                  400, /temporary token/);
+            });
+
+            it("requires a user with roles", async function() {
+                var doc = { username : owner.name };
+                await expectError(tokenManager.authorize(SIS.EVENT_INSERT, doc, null), 401, /User is null/);
+                await expectError(tokenManager.authorize(SIS.EVENT_INSERT, doc, { name : "x" }), 401, /Invalid user/);
+            });
+
+            it("lets the user and admins of the user's roles manage tokens", async function() {
+                var doc = { username : owner.name };
+                (await tokenManager.authorize(SIS.EVENT_INSERT, doc, owner)).should.equal(doc);
+                (await tokenManager.authorize(SIS.EVENT_INSERT, doc, users.admin1)).should.equal(doc);
+                await expectError(tokenManager.authorize(SIS.EVENT_INSERT, doc, users.admin2), 401, /Only admins/);
+            });
+
+            it("resolves with the merged token on update", async function() {
+                var merged = { username : owner.name, desc : "new" };
+                (await tokenManager.authorize(SIS.EVENT_UPDATE, { username : owner.name }, owner, merged))
+                    .should.equal(merged);
+            });
+
+            it("allows everything that keeps the username when auth is off", async function() {
+                var noAuth = Object.create(tokenManager);
+                noAuth.authEnabled = false;
+                var doc = { username : owner.name };
+                (await noAuth.authorize(SIS.EVENT_INSERT, doc, null)).should.equal(doc);
+            });
+
+            it("does not upsert", function() {
+                tokenManager.canInsertWithId("x", { name : "x" }).should.eql(false);
+            });
+        });
+    });
+
 });

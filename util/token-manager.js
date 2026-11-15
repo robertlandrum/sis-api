@@ -20,22 +20,19 @@ function TokenManager(sm, username) {
 require('util').inherits(TokenManager, Manager);
 
 // override add to use createToken
-TokenManager.prototype.add = function(obj, options) {
+TokenManager.prototype.add = async function(obj, options) {
     var user = options ? options.user : null;
     var err = this.validate(obj, false, options);
     if (err) {
-        err = SIS.ERR_BAD_REQ(err);
-        return Promise.reject(err);
+        throw SIS.ERR_BAD_REQ(err);
     }
-    var p = this.authorize(SIS.EVENT_INSERT, obj, user)
-                .then(this.createToken.bind(this));
-    return p;
+    var token = await this.authorize(SIS.EVENT_INSERT, obj, user);
+    return this.createToken(token);
 };
 
 // raw fetch of a token - used for verifying a SIS token
 TokenManager.prototype.getTokenByName = function(token) {
-    var self = this;
-    return Manager.prototype.getById.call(self, token, { lean : true });
+    return Manager.prototype.getById.call(this, token, { lean : true });
 };
 
 TokenManager.prototype.getAll = function(condition, options, fields) {
@@ -44,16 +41,13 @@ TokenManager.prototype.getAll = function(condition, options, fields) {
     return Manager.prototype.getAll.call(this, condition, options, fields);
 };
 
-TokenManager.prototype.getById = function(id, options) {
-    var self = this;
-    return Manager.prototype.getById.call(self, id, options)
-    .then(function(token) {
-        // ensure the token matches the requested username
-        if (token[SIS.FIELD_USERNAME] !== self.username) {
-            return Promise.reject(SIS.ERR_NOT_FOUND('Token for ' + self.username, id));
-        }
-        return token;
-    });
+TokenManager.prototype.getById = async function(id, options) {
+    var token = await Manager.prototype.getById.call(this, id, options);
+    // ensure the token matches the requested username
+    if (token[SIS.FIELD_USERNAME] !== this.username) {
+        throw SIS.ERR_NOT_FOUND('Token for ' + this.username, id);
+    }
+    return token;
 };
 
 TokenManager.prototype.validate = function(obj, toUpdate, options) {
@@ -71,22 +65,20 @@ TokenManager.prototype.validate = function(obj, toUpdate, options) {
     return null;
 };
 
-TokenManager.prototype.createToken = function(token) {
-    // save token
-    var self = this;
-    var createTokenHelper = function() {
+// Save the token under a new random name and resolve with it
+TokenManager.prototype.createToken = async function(token) {
+    for (;;) {
         // 128 bits of randomness as hex (replaces the former 'hat' dependency)
         token.name = crypto.randomBytes(16).toString('hex');
-        var doc = new self.model(token);
-        return Promise.resolve(doc.save()).catch(function(err) {
-            if (err && err.code == 11000) {
-                // duplicate token name - retry with a fresh one
-                return createTokenHelper();
+        try {
+            return await new this.model(token).save();
+        } catch (err) {
+            if (!(err && err.code == 11000)) {
+                throw SIS.ERR_INTERNAL(err);
             }
-            return Promise.reject(SIS.ERR_INTERNAL(err));
-        });
-    };
-    return createTokenHelper();
+            // duplicate token name - retry with a fresh one
+        }
+    }
 };
 
 // check if request user can read the tokens of user
@@ -105,39 +97,35 @@ TokenManager.prototype.canAdministerTokensOf = function(reqUser, user) {
 };
 
 // only the user, super user
-TokenManager.prototype.authorize = function(evt, doc, user, mergedDoc) {
-    var self = this;
+TokenManager.prototype.authorize = async function(evt, doc, user, mergedDoc) {
     if (!doc[SIS.FIELD_USERNAME]) {
-        return Promise.reject(SIS.ERR_BAD_REQ("Missing username in token."));
+        throw SIS.ERR_BAD_REQ("Missing username in token.");
     }
     if (mergedDoc && mergedDoc[SIS.FIELD_USERNAME] != doc[SIS.FIELD_USERNAME]) {
-        return Promise.reject(SIS.ERR_BAD_REQ("Cannot change the username of the token."));
+        throw SIS.ERR_BAD_REQ("Cannot change the username of the token.");
     }
     if (mergedDoc && mergedDoc[SIS.FIELD_EXPIRES]) {
         // a stored temporary token issued before the switch to JWT sessions
-        return Promise.reject(SIS.ERR_BAD_REQ("Cannot change a temporary token."));
+        throw SIS.ERR_BAD_REQ("Cannot change a temporary token.");
     }
-    if (!self.authEnabled) {
-        return Promise.resolve(mergedDoc || doc);
+    if (!this.authEnabled) {
+        return mergedDoc || doc;
     }
     if (!user) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("User is null."));
+        throw SIS.ERR_BAD_CREDS("User is null.");
     }
     if (!user[SIS.FIELD_ROLES] && !user[SIS.FIELD_SUPERUSER]) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("Invalid user."));
+        throw SIS.ERR_BAD_CREDS("Invalid user.");
     }
-    // get the user
-    var username = doc[SIS.FIELD_USERNAME];
-    return self.sm.auth[SIS.SCHEMA_USERS].getById(username).then(function(tokenUser) {
-        if (tokenUser[SIS.FIELD_SUPERUSER] && evt === SIS.EVENT_INSERT) {
-            // super users cannot have a persistent token.  too much power
-            return Promise.reject(SIS.ERR_BAD_REQ("Super users cannot have persistent tokens."));
-        }
-        if (self.canAdministerTokensOf(user, tokenUser)) {
-            return Promise.resolve(mergedDoc || doc);
-        }
-        return Promise.reject(SIS.ERR_BAD_CREDS("Only admins of the user or the user can manage the token."));
-    });
+    var tokenUser = await this.sm.auth[SIS.SCHEMA_USERS].getById(doc[SIS.FIELD_USERNAME]);
+    if (tokenUser[SIS.FIELD_SUPERUSER] && evt === SIS.EVENT_INSERT) {
+        // super users cannot have a persistent token.  too much power
+        throw SIS.ERR_BAD_REQ("Super users cannot have persistent tokens.");
+    }
+    if (!this.canAdministerTokensOf(user, tokenUser)) {
+        throw SIS.ERR_BAD_CREDS("Only admins of the user or the user can manage the token.");
+    }
+    return mergedDoc || doc;
 };
 
 TokenManager.prototype.canInsertWithId = function(id, obj) {

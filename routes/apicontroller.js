@@ -490,13 +490,14 @@ ApiController.prototype._enableCommitApi = function(app, prefix) {
         var id = req.params.id;
         var hid = req.params.hid;
         req.params.isCommitApi = true;
-        this.commitManager.getVersionById(type, id, hid, function(err, result) {
-            if (err || !result) {
-                self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
-            } else {
-                result.value_at = self.convertToResponseObject(req, result.value_at);
-                self.sendObject(res, 200, result);
+        this.commitManager.getVersionById(type, id, hid).then(function(result) {
+            if (!result) {
+                return self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
             }
+            result.value_at = self.convertToResponseObject(req, result.value_at);
+            self.sendObject(res, 200, result);
+        }, function(err) {
+            self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
         });
     }));
 
@@ -505,13 +506,13 @@ ApiController.prototype._enableCommitApi = function(app, prefix) {
         var id = req.params.id;
         var utc = req.params.utc;
         req.params.isCommitApi = true;
-        this.commitManager.getVersionByUtc(type, id, utc, function(err, result) {
-            if (err || !result) {
-                self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
-            } else {
-                result = self.convertToResponseObject(req, result);
-                self.sendObject(res, 200, result);
+        this.commitManager.getVersionByUtc(type, id, utc).then(function(result) {
+            if (!result) {
+                return self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
             }
+            self.sendObject(res, 200, self.convertToResponseObject(req, result));
+        }, function(err) {
+            self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
         });
 
     }));
@@ -598,14 +599,9 @@ ApiController.prototype._saveSingleCommit = function(req, result) {
         default:
             return Promise.reject(SIS.ERR_INTERNAL("invalid commit being saved"));
     }
-    // save it
-    var d = P.defer();
-    var type = this.getType(req);
-    this.commitManager.recordHistory(old, now, req.user, type, function(e, h) {
-        // doesn't matter for now.
-        d.resolve(result);
-    });
-    return d.promise;
+    // a commit that fails to save doesn't fail the request (for now)
+    var done = function() { return result; };
+    return this.commitManager.recordHistory(old, now, req.user, this.getType(req)).then(done, done);
 };
 
 ApiController.prototype._saveBulkCommits = function(req, items) {

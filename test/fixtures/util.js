@@ -235,6 +235,30 @@ function LocalTest() {
 module.exports.LocalTest = LocalTest;
 
 // utilities
+// Await a promise that must reject with a SIS error tuple of the given
+// status, optionally with a message matching pattern.  Resolves with the error.
+module.exports.expectError = async function(promise, status, pattern) {
+    var err = null;
+    try {
+        await promise;
+    } catch (e) {
+        err = e;
+    }
+    if (!err) {
+        throw new Error("expected a rejection with status " + status);
+    }
+    if (!(err instanceof Array)) {
+        throw new Error("expected a SIS error tuple, got " + (err && err.stack || err));
+    }
+    if (err[0] !== status) {
+        throw new Error("expected status " + status + ", got " + JSON.stringify(err.slice(0, 2)));
+    }
+    if (pattern && !pattern.test(err[1].error)) {
+        throw new Error("expected an error matching " + pattern + ", got " + JSON.stringify(err[1]));
+    }
+    return err;
+};
+
 // return full - subset.  both are arrays
 module.exports.invert = function(full, subset) {
     return full.filter(function(item) {

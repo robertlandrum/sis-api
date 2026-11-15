@@ -113,10 +113,7 @@ var startServer = function(callback) {
         }
         app.locals.closeListeners = [];
         var schemaManager = require('./util/schema-manager')(mongoose, appConfig);
-        schemaManager.bootstrapEntitySchemas(function(err) {
-            if (err) {
-                throw err;
-            }
+        return schemaManager.bootstrapEntitySchemas().then(function() {
             passport.use(webUtil.createTokenStrategy(schemaManager, sessionManager));
             passport.use(webUtil.createUserPassStrategy(schemaManager, appConfig));
 
@@ -155,23 +152,24 @@ var startServer = function(callback) {
 
             // listen once the indexes of every model (e.g. the unique names of
             // schemas and users) exist, so no write can slip past them
-            Promise.all(mongoose.modelNames().map(function(name) {
+            return Promise.all(mongoose.modelNames().map(function(name) {
                 return schemaManager.indexesReady(mongoose.model(name));
-            })).then(function() {
-                var httpServer = app.listen(nconf.get('server').port, function(err) {
-                    httpServer.on("close", function() {
-                        app.locals.closeListeners.forEach(function(handler) {
-                            handler();
-                        });
+            }));
+        }).then(function() {
+            var httpServer = app.listen(nconf.get('server').port, function(err) {
+                httpServer.on("close", function() {
+                    app.locals.closeListeners.forEach(function(handler) {
+                        handler();
                     });
-                    if (callback) {
-                        callback(app, httpServer);
-                    }
                 });
+                if (callback) {
+                    callback(app, httpServer);
+                }
             });
         });
     }).catch(function(err) {
-        LOGGER.error({ err : err }, "Error connecting");
+        // e.g. no database, or a stored schema that cannot be built
+        LOGGER.error({ err : err }, "Error starting the server");
         process.exit(1);
     });
 };

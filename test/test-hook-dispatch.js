@@ -38,6 +38,7 @@ describe("Hook Dispatch", function() {
                 data.entity_type.should.eql("sis_hiera");
                 data.hook.should.eql(hookName);
                 data.event.should.eql(SIS.EVENT_INSERT);
+                res.send("ok");
                 if (doneCallback) {
                     doneCallback();
                 }
@@ -141,6 +142,7 @@ describe("Hook Dispatch", function() {
                 req.body.entity_type.should.eql(SIS.SCHEMA_SCHEMAS);
                 req.body.hook.should.eql(hookName);
                 req.body.event.should.eql(SIS.EVENT_INSERT);
+                res.send("ok");
                 if (doneCallback) {
                     doneCallback();
                 }
@@ -214,6 +216,7 @@ describe("Hook Dispatch", function() {
                 req.body.event.should.eql(SIS.EVENT_UPDATE);
                 req.body.data.should.eql(req.body.old_value);
                 req.body.data.should.eql(entity);
+                res.send("ok");
                 if (doneCallback) {
                     doneCallback();
                 }
@@ -318,6 +321,133 @@ describe("Hook Dispatch", function() {
                 res.body.entity.should.eql(entity);
                 d();
             });
+        });
+    });
+
+    describe("Payloads", function() {
+        // what hook receivers get is a public contract - pin all of it
+        var received = [];
+        var hookHttpServer = null;
+        var schema = {
+            name : "test_hook_payloads",
+            id_field : "name",
+            _sis : { owner : ["sistest"] },
+            definition : { name : { type : "String", required : true, unique : true }, num : "Number" }
+        };
+        var url = "/api/v1.1/entities/" + schema.name;
+        var hooks = ["POST", "GET"].map(function(action) {
+            return {
+                name : "test_hook_payloads_" + action.toLowerCase(),
+                _sis : { owner : ["sistest"] },
+                entity_type : schema.name,
+                target : { action : action, url : "http://127.0.0.1:3336/" + action.toLowerCase() },
+                events : [SIS.EVENT_INSERT, SIS.EVENT_UPDATE, SIS.EVENT_DELETE]
+            };
+        });
+
+        before(async function() {
+            var express = require('express');
+            var receiver = express();
+            receiver.set('query parser', 'extended');
+            receiver.use(express.json());
+            receiver.post('/post', function(req, res) {
+                received.push({ action : "POST", body : req.body });
+                res.send("ok");
+            });
+            receiver.get('/get', function(req, res) {
+                received.push({ action : "GET", body : req.query.data });
+                res.send("ok");
+            });
+            await new Promise(function(resolve) { hookHttpServer = receiver.listen(3336, resolve); });
+            await ApiServer.del("/api/v1.1/schemas/" + schema.name);
+            await ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
+            for (var hook of hooks) {
+                await ApiServer.del("/api/v1.1/hooks/" + hook.name);
+                await ApiServer.post("/api/v1.1/hooks").send(hook).expect(201);
+            }
+        });
+
+        after(async function() {
+            hookHttpServer.close();
+            for (var hook of hooks) {
+                await ApiServer.del("/api/v1.1/hooks/" + hook.name).expect(200);
+            }
+            await ApiServer.del("/api/v1.1/schemas/" + schema.name).expect(200);
+        });
+
+        // resolves with the POST and GET payloads of the next write
+        async function payloadsOf(request) {
+            received = [];
+            var res = await request;
+            for (var waited = 0; received.length < 2 && waited < 5000; waited += 20) {
+                await new Promise(function(resolve) { setTimeout(resolve, 20); });
+            }
+            received.length.should.eql(2);
+            var byAction = { };
+            received.forEach(function(r) { byAction[r.action] = r.body; });
+            return { res : res.body, post : byAction.POST, get : byAction.GET };
+        }
+
+        function common(payload, event, isBulk) {
+            payload.hook.should.eql("test_hook_payloads_post");
+            payload.entity_type.should.eql(schema.name);
+            payload.event.should.eql(event);
+            payload.is_bulk.should.eql(isBulk);
+        }
+
+        it("sends the added entity", async function() {
+            var p = await payloadsOf(ApiServer.post(url).send({ name : "p1", num : 1 }).expect(201));
+            common(p.post, SIS.EVENT_INSERT, false);
+            p.post.data.should.eql(p.res);
+            should.not.exist(p.post.old_value);
+            JSON.parse(p.get.data).should.eql(p.res);
+            p.get.event.should.eql(SIS.EVENT_INSERT);
+        });
+
+        it("sends the updated entity and the old one", async function() {
+            var old = (await ApiServer.get(url + "/p1").expect(200)).body;
+            var p = await payloadsOf(ApiServer.put(url + "/p1").send({ num : 2 }).expect(200));
+            common(p.post, SIS.EVENT_UPDATE, false);
+            p.post.data.should.eql(p.res);
+            p.post.old_value.should.eql(old);
+            // a GET hook gets the manager's [old, updated, null] result as JSON
+            var pair = JSON.parse(p.get.data);
+            pair.length.should.eql(3);
+            pair[0].num.should.eql(1);
+            pair[1].should.eql(p.res);
+            should(pair[2]).be.null();
+            should.exist(p.get.old_value);
+        });
+
+        it("sends the deleted entity", async function() {
+            var p = await payloadsOf(ApiServer.del(url + "/p1").expect(200));
+            common(p.post, SIS.EVENT_DELETE, false);
+            p.post.data.should.eql(p.res);
+            should.not.exist(p.post.old_value);
+        });
+
+        it("sends the added entities of a bulk add", async function() {
+            var p = await payloadsOf(ApiServer.post(url).send([{ name : "b1", num : 1 }, { name : "b2", num : 1 }])
+                                     .expect(200));
+            common(p.post, SIS.EVENT_INSERT, true);
+            p.post.data.map(function(e) { return e.name; }).sort().should.eql(["b1", "b2"]);
+            JSON.parse(p.get.data).length.should.eql(2);
+        });
+
+        it("sends the updated entities of a bulk update", async function() {
+            // only the updated entities, without the old ones
+            var p = await payloadsOf(ApiServer.put(url).query({ q : JSON.stringify({ num : 1 }) })
+                                     .send({ num : 5 }).expect(200));
+            common(p.post, SIS.EVENT_UPDATE, true);
+            p.post.data.should.eql(p.res.success);
+            p.post.data.map(function(e) { return [e.name, e.num]; }).sort().should.eql([["b1", 5], ["b2", 5]]);
+            should.not.exist(p.post.old_value);
+        });
+
+        it("sends the deleted entities of a bulk delete", async function() {
+            var p = await payloadsOf(ApiServer.del(url).query({ q : JSON.stringify({ num : 5 }) }).expect(200));
+            common(p.post, SIS.EVENT_DELETE, true);
+            p.post.data.map(function(e) { return e.name; }).sort().should.eql(["b1", "b2"]);
         });
     });
 });

@@ -194,6 +194,16 @@ describe('@API @V1.1API - Entity References', function() {
                 });
         });
 
+        it("should add a ref_2 with the refs it was read with", async function() {
+            // a GET populates the refs - adding a copy must take them back
+            var read = (await ApiServer.get("/api/v1.1/entities/ref_2").query({ q : { name : "good_ref_2" } })
+                        .expect(200)).body[0];
+            read.refs[0].should.have.property("name");
+            var res = await ApiServer.post("/api/v1.1/entities/ref_2").query("populate=false")
+                .send({ name : "copied_ref_2", refs : read.refs }).expect(201);
+            res.body.refs.should.eql(read.refs.map(function(r) { return r._id; }));
+        });
+
         it("should be able to update arrays of refs", function(done) {
             var good_refs = entities.ref_1;
             var ids = [good_refs[0]._id, good_refs[1]._id];

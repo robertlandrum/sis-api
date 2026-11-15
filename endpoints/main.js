@@ -3,7 +3,6 @@
 'use strict';
 
 var nconf = require('nconf');
-var P = require("../util/promises");
 var mongoose = require("mongoose");
 var SIS = require("../util/constants");
 
@@ -31,12 +30,9 @@ Promise.resolve(mongoose.connect(nconf.get('db').url, opts))
 .then(function() {
     var appConfig = nconf.get('app') || { };
     var schemaManager = require('../util/schema-manager')(mongoose, appConfig);
-    var d = P.defer();
-    schemaManager.bootstrapEntitySchemas(function(err) {
-        if (err) { return d.reject(err); }
-        return d.resolve(schemaManager);
+    return schemaManager.bootstrapEntitySchemas().then(function() {
+        return schemaManager;
     });
-    return d.promise;
 }).then(function(schemaManager) {
     var ScriptRunner = require('./runner');
     var runner = new ScriptRunner(schemaManager);

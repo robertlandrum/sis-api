@@ -361,4 +361,110 @@ describe('@API @V1.1API - History API', function() {
         });
     });
 
+    describe("Commit lookups", function() {
+        var schema = {
+            name : "history_test_4",
+            _sis : { owner : ["sistest"] },
+            definition : { name : "String", n : "Number" }
+        };
+        var url = "/api/v1.1/entities/" + schema.name;
+        var kept = null;
+        var deleted = null;
+        var commits = null;
+
+        before(async function() {
+            await ApiServer.del("/api/v1.1/schemas/" + schema.name);
+            await ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
+            kept = (await ApiServer.post(url).send({ name : "kept", n : 1 }).expect(201)).body;
+            kept = (await ApiServer.put(url + "/" + kept._id).send({ n : 2 }).expect(200)).body;
+            deleted = (await ApiServer.post(url).send({ name : "deleted", n : 1 }).expect(201)).body;
+            await ApiServer.del(url + "/" + deleted._id).expect(200);
+            commits = {
+                kept : (await ApiServer.get(url + "/" + kept._id + "/commits").expect(200)).body,
+                deleted : (await ApiServer.get(url + "/" + deleted._id + "/commits").expect(200)).body
+            };
+        });
+
+        after(async function() {
+            await ApiServer.del("/api/v1.1/schemas/" + schema.name);
+        });
+
+        function commitUrl(entity, action) {
+            var commit = commits[entity.name].filter(function(c) { return c.action === action; })[0];
+            return url + "/" + entity._id + "/commits/" + commit._id;
+        }
+
+        it("should get an insert commit with the inserted object", async function() {
+            var res = await ApiServer.get(commitUrl(kept, "insert")).expect(200);
+            res.body.action.should.eql("insert");
+            res.body.value_at.n.should.eql(1);
+        });
+
+        it("should get an update commit with the updated object", async function() {
+            var res = await ApiServer.get(commitUrl(kept, "update")).expect(200);
+            res.body.value_at.should.eql(kept);
+        });
+
+        it("should get a delete commit with the deleted object", async function() {
+            var res = await ApiServer.get(commitUrl(deleted, "delete")).expect(200);
+            res.body.value_at.name.should.eql("deleted");
+        });
+
+        it("should not get a commit through another object", async function() {
+            var other = commitUrl(deleted, "insert").replace(deleted._id, kept._id);
+            await ApiServer.get(other).expect(404);
+        });
+
+        it("should not get a commit that does not exist", async function() {
+            await ApiServer.get(url + "/" + kept._id + "/commits/5f0000000000000000000000").expect(404);
+            await ApiServer.get(url + "/" + kept._id + "/commits/not_a_commit").expect(404);
+        });
+
+        it("should not get a revision from before the object existed", async function() {
+            var before = kept._sis._created_at - 1000;
+            await ApiServer.get(url + "/" + kept._id + "/revision/" + before).expect(404);
+        });
+
+        it("should get the current object for a revision in the future", async function() {
+            var res = await ApiServer.get(url + "/" + kept._id + "/revision/" + (Date.now() + 100000)).expect(200);
+            res.body.should.eql(kept);
+        });
+
+        describe("when history was turned on after the object was added", function() {
+            var lateSchema = {
+                name : "history_test_5",
+                _sis : { owner : ["sistest"] },
+                track_history : false,
+                definition : { name : "String", n : "Number" }
+            };
+            var lateUrl = "/api/v1.1/entities/" + lateSchema.name;
+            var late = null;
+
+            before(async function() {
+                await ApiServer.del("/api/v1.1/schemas/" + lateSchema.name);
+                await ApiServer.post("/api/v1.1/schemas").send(lateSchema).expect(201);
+                late = (await ApiServer.post(lateUrl).send({ name : "late", n : 1 }).expect(201)).body;
+                lateSchema.track_history = true;
+                await ApiServer.put("/api/v1.1/schemas/" + lateSchema.name).send(lateSchema).expect(200);
+                await ApiServer.put(lateUrl + "/" + late._id).send({ n : 2 }).expect(200);
+            });
+
+            after(async function() {
+                await ApiServer.del("/api/v1.1/schemas/" + lateSchema.name);
+            });
+
+            it("should not get a revision", async function() {
+                await ApiServer.get(lateUrl + "/" + late._id + "/revision/" + Date.now()).expect(404);
+            });
+
+            it("should answer for an update commit", async function() {
+                var list = (await ApiServer.get(lateUrl + "/" + late._id + "/commits").expect(200)).body;
+                list.map(function(c) { return c.action; }).should.eql(["update"]);
+                // there is no insert to apply the update to
+                await ApiServer.get(lateUrl + "/" + late._id + "/commits/" + list[0]._id)
+                    .timeout(5000).expect(404);
+            });
+        });
+    });
+
 });

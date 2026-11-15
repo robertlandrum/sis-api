@@ -66,10 +66,7 @@ var opts = nconf.get('db').opts || { };
 
 mongoose.connect(nconf.get('db').url, opts).then(function() {
     var schemaManager = require('../util/schema-manager')(mongoose, appConfig);
-    schemaManager.bootstrapEntitySchemas(function(err) {
-        if (err) {
-            return fail("Error initializing schemas.", err);
-        }
+    schemaManager.bootstrapEntitySchemas().then(function() {
         var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
         if (action === 'update') {
             updateUser(userManager, user).then(function() {
@@ -86,6 +83,8 @@ mongoose.connect(nconf.get('db').url, opts).then(function() {
                 fail("Error deleting user.", err);
             });
         }
+    }, function(err) {
+        fail("Error initializing schemas.", err);
     });
 }, function(err) {
     fail("Error connecting to the database.", err);

@@ -271,6 +271,19 @@ describe('@API @V1.1API - Authorization API Entities', function() {
             });
         });
 
+
+        it("should not add an entity for a user without roles", async function() {
+            var user = { name : "open_no_roles", email : "open_no_roles@test.com", pw : "open_no_roles", roles : { } };
+            await ApiServer.del("/api/v1.1/users/" + user.name, superToken);
+            await ApiServer.post("/api/v1.1/users", superToken).send(user).expect(201);
+            var token = await new Promise(function(resolve, reject) {
+                ApiServer.getTempToken(user.name, user.pw, function(e, t) { return e ? reject(e) : resolve(t.name); });
+            });
+            var res = await ApiServer.post("/api/v1.1/entities/" + schema.name, token)
+                .send({ name : user.name }).expect(400);
+            res.body.error.should.match(/User must have roles assigned/);
+            await ApiServer.del("/api/v1.1/users/" + user.name, superToken).expect(200);
+        });
         // adds
         testUsers.forEach(function(user) {
             it("should add an entity for " + user, function(done) {

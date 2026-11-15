@@ -6,7 +6,6 @@
 
 var jsondiff = require('jsondiffpatch');
 var SIS = require('./constants');
-var P = require("./promises");
 
 var docToPojo = function(doc) {
     if (typeof doc.toObject === 'function') {
@@ -77,7 +76,9 @@ function CommitManager(schemaManager) {
         return doc;
     }
 
-    this.recordHistoryBulk = function(items, user, action, type) {
+    // Record the commits of a bulk operation.  For updates, items are
+    // [old, updated] pairs.  Resolves with items.
+    this.recordHistoryBulk = async function(items, user, action, type) {
         var ts = Date.now();
         var commits = [];
 
@@ -99,41 +100,35 @@ function CommitManager(schemaManager) {
         commits = commits.map(function(c) {
             return new self.model(c).toObject();
         });
-        if (!commits.length) {
-            return Promise.resolve(items);
+        if (commits.length) {
+            // do a bulk insert directly
+            await self.model.collection.insertMany(commits);
         }
-
-        // do a bulk insert directly
-        return Promise.resolve(self.model.collection.insertMany(commits)).then(function() {
-            return items;
-        });
+        return items;
     };
 
-    this.recordHistory = function(oldDoc, newDoc, user, type, callback) {
-        var ts = Date.now();
-        var doc = createCommitObject(oldDoc, newDoc, user, type, ts);
+    // Record the commit of a single operation.  Resolves with the commit, or
+    // null if an update changed nothing.
+    this.recordHistory = async function(oldDoc, newDoc, user, type) {
+        var doc = createCommitObject(oldDoc, newDoc, user, type, Date.now());
         if (!doc) {
-            callback(null, null);
-            return;
+            return null;
         }
-        var entry = new self.model(doc);
-        Promise.resolve(entry.save()).then(function(res) {
-            callback(null, res);
-        }, function(err) {
-            callback(SIS.ERR_INTERNAL(err), null);
-        });
+        try {
+            return await new self.model(doc).save();
+        } catch (err) {
+            throw SIS.ERR_INTERNAL(err);
+        }
     };
 
     // aggregate commits where the first commit is the insert
-    // followed by a series of updates (patches)
+    // followed by a series of updates (patches).  Returns null if
+    // there is no insert to start from (tracking was enabled later)
     var aggregateCommits = function(commits) {
-        // first commit should be the insert
         // TODO: look into offloading to node-webworker-threads
         // if intense
         var initial = commits.shift();
-        if (initial.action !== 'insert') {
-            // in a situation where tracking was enabled
-            // later
+        if (!initial || initial.action !== 'insert') {
             return null;
         }
         var patched = commits.reduce(function(obj, commit) {
@@ -146,97 +141,85 @@ function CommitManager(schemaManager) {
         return patched;
     };
 
-    this.getCommitsOnObject = function(id, type, timestamp) {
+    // Resolves with the commits on the object up to timestamp, starting
+    // with its latest insert - or [] if there is none
+    this.getCommitsOnObject = async function(id, type, timestamp) {
         var condition = {
             entity_id : id,
             type : type,
             date_modified : { $lte : timestamp },
             action : 'insert'
         };
-        var fields = 'date_modified entity_oid';
-        var sort = { date_modified : -1 };
-        var commits = [];
-        // result promise
-        var d = P.defer();
-        // find the first commit
-        var query = self.model.findOne(condition).select(fields).sort(sort);
-        Promise.resolve(query.exec()).then(function(first) {
+        try {
+            // find the first commit
+            var first = await self.model.findOne(condition).select('date_modified entity_oid')
+                .sort({ date_modified : -1 }).exec();
             if (!first) {
-                return d.resolve([]);
+                return [];
             }
-            var start_date = first.date_modified;
             delete condition.action;
             condition.entity_oid = first.entity_oid;
-            condition.date_modified = { $lte : timestamp, $gte : start_date };
-            fields = 'commit_data action entity_oid';
-            sort.date_modified = 1;
-            return Promise.resolve(self.model.find(condition).select(fields).sort(sort).exec())
-            .then(function(commits) {
-                d.resolve(commits || []);
-            });
-        }).catch(function(err) {
-            d.resolve([]);
-        });
-
-        return d.promise;
+            condition.date_modified = { $lte : timestamp, $gte : first.date_modified };
+            var commits = await self.model.find(condition).select('commit_data action entity_oid')
+                .sort({ date_modified : 1 }).exec();
+            return commits || [];
+        } catch (err) {
+            return [];
+        }
     };
 
-    this.applyDiff = function(result, callback) {
+    // Resolves with the object as it was after the commit
+    this.applyDiff = async function(result) {
         // get the low hanging fruit ones out
         if (result.action == 'insert' || result.action == 'delete') {
-            return callback(null, result.commit_data);
+            return result.commit_data;
         } else if (result.action != 'update') {
-            return callback(SIS.ERR_INTERNAL("unknown commit type found " + result.action), null);
+            throw SIS.ERR_INTERNAL("unknown commit type found " + result.action);
         }
         // get the commits on the object that precede this
-        this.getCommitsOnObject(result.entity_id, result.type, result.date_modified)
-            .then(function(commits) {
-            var patched = aggregateCommits(commits);
-            return callback(null, patched);
-        });
+        var commits = await this.getCommitsOnObject(result.entity_id, result.type, result.date_modified);
+        var patched = aggregateCommits(commits);
+        if (!patched) {
+            throw SIS.ERR_NOT_FOUND("Full commit history unavailable.");
+        }
+        return patched;
     };
 
-    this.getVersionById = function(type, id, hid, callback) {
-        Promise.resolve(self.model.findOne({'_id' : hid}).exec()).then(function(result) {
-            if (!result) {
-                return callback(null, null);
-            }
-            if (type != result.type ||
-                id != result.entity_id) {
-                return callback(SIS.ERR_NOT_FOUND("commit", hid), null);
-            }
-            self.applyDiff(result, function(err, obj) {
-                if (err) {
-                    return callback(err, null);
-                }
-                result = result.toObject();
-                result.value_at = obj;
-                callback(null, result);
-            });
-        }, function(err) {
-            callback(err, null);
-        });
+    // Resolves with the commit hid of the object, with the object as it
+    // was after the commit in value_at - or null if there is no such commit
+    this.getVersionById = async function(type, id, hid) {
+        var result = await self.model.findOne({ '_id' : hid }).exec();
+        if (!result) {
+            return null;
+        }
+        if (type != result.type ||
+            id != result.entity_id) {
+            throw SIS.ERR_NOT_FOUND("commit", hid);
+        }
+        var obj = await self.applyDiff(result);
+        result = result.toObject();
+        result.value_at = obj;
+        return result;
     };
 
-    this.getVersionByUtc = function(type, id, utc, callback) {
-        this.getCommitsOnObject(id, type, utc).then(function(commits) {
-            if (!commits.length) {
-                callback(SIS.ERR_NOT_FOUND("commit", utc), null);
-            } else {
-                if (commits.length == 1) {
-                    // only one commit - it's an insert.
-                    return callback(null, commits[0].commit_data);
-                } else if (commits[commits.length - 1].action == 'delete') {
-                    return callback(null, commits[commits.length - 1].commit_data);
-                }
-                // merge
-                var patched = aggregateCommits(commits);
-                if (!patched) {
-                    return callback(SIS.ERR_NOT_FOUND("Full commit history unavailable."), null);
-                }
-                return callback(null, patched);
-            }
-        });
+    // Resolves with the object as it was at utc
+    this.getVersionByUtc = async function(type, id, utc) {
+        var commits = await this.getCommitsOnObject(id, type, utc);
+        if (!commits.length) {
+            throw SIS.ERR_NOT_FOUND("commit", utc);
+        }
+        if (commits.length == 1) {
+            // only one commit - it's an insert.
+            return commits[0].commit_data;
+        } else if (commits[commits.length - 1].action == 'delete') {
+            return commits[commits.length - 1].commit_data;
+        }
+        // merge
+        var patched = aggregateCommits(commits);
+        if (!patched) {
+            throw SIS.ERR_NOT_FOUND("Full commit history unavailable.");
+        }
+        return patched;
     };
 }
 
