@@ -36,21 +36,7 @@ describe('Manager', function() {
         };
     }
 
-    async function expectError(promise, status, pattern) {
-        var err = null;
-        try {
-            await promise;
-        } catch (e) {
-            err = e;
-        }
-        should.exist(err, "expected a rejection");
-        err.should.be.instanceof(Array);
-        err[0].should.eql(status);
-        if (pattern) {
-            err[1].error.should.match(pattern);
-        }
-        return err;
-    }
+    var expectError = TestUtil.expectError;
 
     function item(name, num, owner) {
         var result = { name : name, num : num };

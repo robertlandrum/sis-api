@@ -315,4 +315,144 @@ describe('User Manager', function() {
             }
         });
     });
+
+    describe("edge cases", function() {
+        var expectError = TestUtil.expectError;
+        var userManager = null;
+        var superUser = { name : "edge_super", super_user : true };
+        var edgeAdmin = { name : "edge_admin", email : "edge_admin@test.com", pw : "edge_admin",
+                          roles : { test_g1 : "admin" } };
+        var edgeUser = { name : "edge_user", email : "edge_user@test.com", pw : "edge_user",
+                         roles : { test_g1 : "user" } };
+
+        before(async function() {
+            userManager = schemaManager.auth[SIS.SCHEMA_USERS];
+            for (var u of [edgeAdmin, edgeUser]) {
+                await userManager.add(u, { user : superUser });
+            }
+        });
+
+        after(async function() {
+            for (var name of [edgeAdmin.name, edgeUser.name, "edge_new"]) {
+                try {
+                    await userManager.delete(name, { user : superUser });
+                } catch (err) {
+                    // not every test leaves it behind
+                }
+            }
+        });
+
+        it("ends the sessions of a user", async function() {
+            var before = (await userManager.getById(edgeUser.name, { lean : true }))[SIS.FIELD_SESSION_GEN] || 0;
+            (await userManager.endSessions(edgeUser.name)).should.eql(edgeUser.name);
+            var after = (await userManager.getById(edgeUser.name, { lean : true }))[SIS.FIELD_SESSION_GEN];
+            after.should.eql(before + 1);
+            await expectError(userManager.endSessions("nobody"), 404);
+        });
+
+        it("verifies passwords", async function() {
+            (await userManager.getVerifiedUser(edgeUser.name, edgeUser.pw)).name.should.eql(edgeUser.name);
+            await expectError(userManager.getVerifiedUser(edgeUser.name, "wrong"), 401, /Invalid password/);
+            await expectError(userManager.getVerifiedUser("nobody", "x"), 404);
+        });
+
+        it("requires a name", function() {
+            userManager.validate(null).should.match(/must have a name/);
+            userManager.validate({}).should.match(/must have a name/);
+        });
+
+        describe("getOrCreateEmptyUser", function() {
+            it("rejects incomplete users", async function() {
+                await expectError(userManager.getOrCreateEmptyUser(null, superUser), 500, /Invalid user/);
+                await expectError(userManager.getOrCreateEmptyUser({ name : "x" }, superUser), 500, /Invalid user/);
+            });
+
+            it("returns the user that exists", async function() {
+                var user = await userManager.getOrCreateEmptyUser({ name : edgeUser.name, email : "other@x.com" }, superUser);
+                user.email.should.eql(edgeUser.email);
+                user.roles.should.eql(edgeUser.roles);
+            });
+
+            it("creates a user without roles", async function() {
+                var user = await userManager.getOrCreateEmptyUser({ name : "edge_new", email : "edge_new@x.com" }, superUser);
+                user.name.should.eql("edge_new");
+                user.roles.should.eql({});
+                user.super_user.should.eql(false);
+                (await userManager.getById("edge_new", { lean : true })).email.should.eql("edge_new@x.com");
+            });
+        });
+
+        describe("authorize", function() {
+            it("allows everything when auth is off", async function() {
+                var noAuth = Object.create(userManager);
+                noAuth.authEnabled = false;
+                var doc = { name : "x" };
+                (await noAuth.authorize(SIS.EVENT_INSERT, doc, null)).should.equal(doc);
+            });
+
+            it("requires a user with roles", async function() {
+                await expectError(userManager.authorize(SIS.EVENT_INSERT, { name : "x" }, null), 401, /User is null/);
+                await expectError(userManager.authorize(SIS.EVENT_INSERT, { name : "x" }, { name : "y" }),
+                                  401, /no roles/);
+            });
+
+            it("does not let users add or delete themselves", async function() {
+                var doc = { name : edgeAdmin.name, roles : { test_g1 : "user" } };
+                await expectError(userManager.authorize(SIS.EVENT_DELETE, doc, edgeAdmin), 401, /same name/);
+            });
+
+            it("does not let users change their own roles", async function() {
+                var doc = (await userManager.getById(edgeAdmin.name)).toObject();
+                var merged = await userManager.getById(edgeAdmin.name);
+                merged.roles = { test_g1 : "admin", test_g2 : "user" };
+                await expectError(userManager.authorize(SIS.EVENT_UPDATE, doc, edgeAdmin, merged),
+                                  401, /cannot change their own roles/);
+            });
+
+            it("only lets role admins change roles of others", async function() {
+                var doc = (await userManager.getById(edgeUser.name)).toObject();
+                var merged = await userManager.getById(edgeUser.name);
+                merged.roles = { test_g1 : "user", test_g2 : "user" };
+                await expectError(userManager.authorize(SIS.EVENT_UPDATE, doc, edgeAdmin, merged),
+                                  401, /not an admin of role test_g2/);
+            });
+
+            it("does not let role admins change other fields", async function() {
+                var doc = (await userManager.getById(edgeUser.name)).toObject();
+                var merged = await userManager.getById(edgeUser.name);
+                merged.roles = { test_g1 : "admin" };
+                merged.email = "changed@x.com";
+                await expectError(userManager.authorize(SIS.EVENT_UPDATE, doc, edgeAdmin, merged),
+                                  401, /non role fields. \(email\)/);
+            });
+
+            it("only lets the user change their own fields", async function() {
+                var doc = (await userManager.getById(edgeUser.name)).toObject();
+                var merged = await userManager.getById(edgeUser.name);
+                merged.email = "changed@x.com";
+                await expectError(userManager.authorize(SIS.EVENT_UPDATE, doc, edgeAdmin, merged),
+                                  401, /Only the user or a super user/);
+                (await userManager.authorize(SIS.EVENT_UPDATE, doc, edgeUser, merged)).should.equal(merged);
+            });
+
+            it("does not let users verify themselves", async function() {
+                var doc = (await userManager.getById(edgeUser.name)).toObject();
+                var merged = await userManager.getById(edgeUser.name);
+                merged.verified = true;
+                await expectError(userManager.authorize(SIS.EVENT_UPDATE, doc, edgeUser, merged),
+                                  400, /verified state/);
+            });
+        });
+
+        it("rejects when the user's tokens cannot be removed", async function() {
+            var broken = Object.create(userManager);
+            broken.sm = Object.create(schemaManager);
+            broken.sm.getTokenManagerForUser = function() {
+                return { model : { deleteMany : function() {
+                    return { exec : function() { return Promise.reject(new Error("db down")); } };
+                } } };
+            };
+            await expectError(broken.objectRemoved({ name : "x" }), 500, /Unable to clear tokens/);
+        });
+    });
 });
