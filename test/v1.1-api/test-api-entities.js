@@ -478,6 +478,49 @@ describe('@API @V1.1API - Entity API', function() {
         });
     });
 
+    describe("SIS maintained meta fields", function() {
+        var schema = {
+            name : "test_sis_meta_entity",
+            _sis : { owner : ["sistest"] },
+            definition : { name : "String", num : "Number" }
+        };
+        var entityUrl = "/api/v1.1/entities/" + schema.name;
+        var doc = null;
+        before(function(done) {
+            ApiServer.del("/api/v1.1/schemas/" + schema.name).end(function() {
+                ApiServer.post('/api/v1.1/schemas').send(schema).expect(201, function(err) {
+                    if (err) { return done(err); }
+                    ApiServer.post(entityUrl).send({ name : "meta", num : 0 })
+                    .expect(201, function(err, res) {
+                        doc = res.body;
+                        done(err);
+                    });
+                });
+            });
+        });
+        after(function(done) {
+            ApiServer.del("/api/v1.1/schemas/" + schema.name).expect(200, done);
+        });
+
+        it("should not let an update set them", function(done) {
+            var update = { num : 1, _sis : { _created_by : "forged", _created_at : 1,
+                                              _updated_by : "forged", _updated_at : 1 } };
+            ApiServer.put(entityUrl + "/" + doc._id).send(update).expect(200, function(err) {
+                if (err) { return done(err); }
+                ApiServer.get(entityUrl + "/" + doc._id).expect(200, function(err, res) {
+                    if (err) { return done(err); }
+                    var meta = res.body._sis;
+                    res.body.num.should.eql(1);
+                    meta._created_by.should.eql(doc._sis._created_by);
+                    meta._created_at.should.eql(doc._sis._created_at);
+                    meta._updated_by.should.eql(doc._sis._updated_by);
+                    meta._updated_at.should.be.aboveOrEqual(doc._sis._updated_at);
+                    done();
+                });
+            });
+        });
+    });
+
     describe("CAS operations", function() {
 
         var schema = {

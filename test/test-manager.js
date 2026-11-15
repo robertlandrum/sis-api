@@ -478,6 +478,18 @@ describe('Manager', function() {
             meta(updated).owner.should.eql(["g1", "g2"]);
         });
 
+        it("keeps the meta fields SIS maintains", async function() {
+            var before = await Model.findOne({ name : "a" }).lean();
+            var update = { num : 2, _sis : { _created_by : "forged", _created_at : 1,
+                                              _updated_by : "forged", _updated_at : 1 } };
+            await mgr.update("a", update, { user : admin });
+            var stored = meta(await Model.findOne({ name : "a" }).lean());
+            stored._created_by.should.eql("super");
+            stored._created_at.should.eql(meta(before)._created_at);
+            stored._updated_by.should.eql("admin_user");
+            stored._updated_at.should.be.aboveOrEqual(meta(before)._updated_at);
+        });
+
         it("rejects with 404 for a missing object", async function() {
             await expectError(mgr.update("missing", { num : 2 }, { user : admin }), 404);
         });

@@ -369,8 +369,16 @@ Manager.prototype._update = async function(id, obj, options, saveFunc) {
     // always convert the obj to V1.1
     obj = SIS.ENSURE_SIS_META(obj);
 
+    // the meta fields starting with _ (such as _created_by) are kept by SIS,
+    // so an update can not set them
+    var updateMeta = obj[SIS.FIELD_SIS_META];
+    Object.keys(updateMeta).forEach(function(k) {
+        if (k[0] === '_') {
+            delete updateMeta[k];
+        }
+    });
+
     // set the mutable meta fields
-    var updateMeta = obj[SIS.FIELD_SIS_META] || { };
     SIS.MUTABLE_META_FIELDS.forEach(function(k) {
         if (k in updateMeta) {
             found[SIS.FIELD_SIS_META][k] = updateMeta[k];
