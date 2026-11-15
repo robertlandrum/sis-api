@@ -168,7 +168,7 @@ describe('SchemaManager', function() {
             var schema = {
                 name : 'invalid',
                 _sis : { owner : ['invalid'] },
-                defintion : { 'bogus' : 'Unknown' }
+                definition : { 'bogus' : 'Unknown' }
             };
             var model = schemaManager.getEntityModel(schema);
             should.not.exist(model);
@@ -489,5 +489,117 @@ describe('SchemaManager', function() {
             }).catch(done);
         });
 
+    });
+
+    describe("edge cases", function() {
+        var expectError = TestUtil.expectError;
+        var superUser = { name : "sm_super", super_user : true };
+
+        function schemaWith(fields) {
+            return Object.assign({ name : "sm_edge", _sis : { owner : ["test"] },
+                                   definition : { name : "String" } }, fields);
+        }
+
+        it("validates the schema fields", function() {
+            schemaManager.validate(schemaWith({ name : "sis_edge" })).should.match(/reserved/);
+            schemaManager.validate(schemaWith({ locked_fields : "name" })).should.match(/locked_fields must be an array/);
+            schemaManager.validate(schemaWith({ definition : { _hidden : "String" } })).should.match(/_hidden is a reserved field/);
+            schemaManager.validate(schemaWith({ id_field : "name" })).should.match(/required and unique/);
+            schemaManager.validate(schemaWith({ definition : { name : { type : "String", match : "/abc" } } }))
+                .should.match(/Schema is invalid: match/);
+            should.not.exist(schemaManager.validate(schemaWith({ definition : { name : { type : "String", match : "/a.c/i" } } })));
+            schemaManager.validate(schemaWith({ definition : { name : "String", _sis : { owner : "Number" } } }))
+                .should.match(/owner must be a String array/);
+        });
+
+        it("turns empty objects in the definition into Mixed", function() {
+            var schema = schemaWith({ definition : { name : "String", stuff : { } } });
+            should.not.exist(schemaManager.validate(schema));
+            schema.definition.stuff.should.eql({ type : "Mixed" });
+        });
+
+        it("picks a required and unique id field", async function() {
+            var unique = { type : "String", required : true, unique : true };
+            (await schemaManager.preAdd({ definition : { name : unique, id : unique } })).id_field.should.eql("name");
+            (await schemaManager.preAdd({ definition : { other : unique, id : unique } })).id_field.should.eql("id");
+            (await schemaManager.preAdd({ definition : { a : "String", b : unique } })).id_field.should.eql("b");
+            should.not.exist((await schemaManager.preAdd({ definition : { a : "String" } })).id_field);
+            (await schemaManager.preAdd({ id_field : "a", definition : { a : "String", name : unique } }))
+                .id_field.should.eql("a");
+        });
+
+        it("records the schemas a schema references", async function() {
+            var schema = { _sis : { }, definition : { r : { type : "ObjectId", ref : "other" }, n : "String" } };
+            (await schemaManager._preSave(schema))._sis._references.should.eql(["other"]);
+        });
+
+        it("rejects getting the model of a schema that does not exist", async function() {
+            await expectError(schemaManager.getEntityModelAsync("sm_missing"), 400, /Invalid schema found with name sm_missing/);
+        });
+
+        it("rejects getting the model when the lookup fails", async function() {
+            var broken = Object.create(schemaManager);
+            broken.model = { findOne : function() {
+                return { exec : function() { return Promise.reject(new Error("db down")); } };
+            } };
+            await expectError(broken.getEntityModelAsync("x"), 400, /Schema not found with name x/);
+        });
+
+        it("knows the models it has built", function() {
+            schemaManager.hasEntityModel(SIS.SCHEMA_SCHEMAS).should.eql(true);
+            schemaManager.getEntityModelByName(SIS.SCHEMA_SCHEMAS).should.equal(schemaManager.model);
+            schemaManager.hasEntityModel("sm_never_built").should.eql(false);
+        });
+
+        it("has no token managers when auth is off", function() {
+            should.not.exist(schemaManager.getTokenManagerForUser("anyone"));
+        });
+
+        it("removes a schema whose collection was never created", async function() {
+            var schema = { name : "sm_no_collection", definition : { name : "String" } };
+            (await schemaManager.objectRemoved(schema)).should.equal(schema);
+        });
+
+        it("goes ahead without indexes it cannot build", async function() {
+            var model = { init : function() { return Promise.reject(new Error("duplicates")); },
+                          collection : { name : "sm_dupes" } };
+            should.not.exist(await schemaManager.indexesReady(model));
+        });
+
+        it("counts the entities of schemas when asked", async function() {
+            var schema = schemaWith({ name : "sm_counted" });
+            await schemaManager.add(schema, { user : superUser });
+            var model = schemaManager.getEntityModel(await schemaManager.getById("sm_counted", { lean : true }));
+            await new model({ name : "a" }).save();
+            var options = { lean : true, query : { with_counts : "true" } };
+            (await schemaManager.getById("sm_counted", options)).entity_count.should.eql(1);
+            var all = await schemaManager.getAll({ name : "sm_counted" }, options);
+            all[0].entity_count.should.eql(1);
+            should.not.exist((await schemaManager.getById("sm_counted", { lean : true })).entity_count);
+            await schemaManager.delete("sm_counted", { user : superUser });
+        });
+
+        describe("bootstrap", function() {
+            var bad = { name : "sm_bad_stored", definition : { field : { type : "Bogus" } } };
+
+            after(async function() {
+                await schemaManager.model.collection.deleteOne({ name : bad.name });
+            });
+
+            it("builds the models of the stored schemas", function(done) {
+                schemaManager.bootstrapEntitySchemas(done);
+            });
+
+            it("fails on a stored schema it cannot build", function(done) {
+                schemaManager.model.collection.insertOne(Object.assign({}, bad)).then(function() {
+                    schemaManager.bootstrapEntitySchemas(function(err) {
+                        should.exist(err);
+                        err[0].should.eql(500);
+                        err[1].error.should.match(/Error building schema/);
+                        done();
+                    });
+                }, done);
+            });
+        });
     });
 });
