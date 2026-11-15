@@ -457,6 +457,13 @@ describe('@API @V1.1API - History API', function() {
                 await ApiServer.get(lateUrl + "/" + late._id + "/revision/" + Date.now()).expect(404);
             });
 
+            it("should answer for an update commit", async function() {
+                var list = (await ApiServer.get(lateUrl + "/" + late._id + "/commits").expect(200)).body;
+                list.map(function(c) { return c.action; }).should.eql(["update"]);
+                // there is no insert to apply the update to
+                await ApiServer.get(lateUrl + "/" + late._id + "/commits/" + list[0]._id)
+                    .timeout(5000).expect(404);
+            });
         });
     });
 
