@@ -8,7 +8,6 @@ var logger = require("./logger");
 
 var SIS = require('./constants');
 var Manager = require("./manager");
-var P = require("./promises");
 
 var LOGGER = logger.createLogger({
     name : "HookManager"
@@ -63,37 +62,41 @@ HookManager.prototype.validate = function(modelObj, toUpdate, options) {
 };
 /////////////////////////////////
 
-var sendRequest = function(options, retry_count, delay, d) {
+var sleep = function(ms) {
+    return new Promise(function(resolve) { setTimeout(resolve, ms); });
+};
+
+// Send the hook request, retrying up to retryCount times delay seconds
+// apart.  Resolves with the response body.
+var sendRequest = async function(options, retryCount, delay) {
     var fetchOpts = Object.assign({ }, requestDefaults, { method: options.method });
     fetchOpts.headers = Object.assign({ }, requestDefaults.headers, options.headers);
     if (options.body !== undefined) {
         fetchOpts.body = options.body;
     }
-    fetch(options.url, fetchOpts).then(function(res) {
-        if (res.status >= 300) {
-            // non 2xx - treat as an error so the retry logic kicks in
-            var httpErr = new Error("Hook target responded with status " + res.status);
-            httpErr.statusCode = res.status;
-            throw httpErr;
+    for (;;) {
+        try {
+            var res = await fetch(options.url, fetchOpts);
+            if (res.status >= 300) {
+                // non 2xx - treat as an error so the retry logic kicks in
+                var httpErr = new Error("Hook target responded with status " + res.status);
+                httpErr.statusCode = res.status;
+                throw httpErr;
+            }
+            return await res.text();
+        } catch (err) {
+            LOGGER.error({ err: err }, "Error Response from Outbound Hook Request");
+            if (retryCount <= 0) {
+                LOGGER.error({ err: err }, "Exhausted retries");
+                throw SIS.ERR_INTERNAL(err);
+            }
+            retryCount--;
+            await sleep(delay * 1000);
         }
-        return res.text();
-    }).then(function(body) {
-        // success!
-        d.resolve(body);
-    }).catch(function(err) {
-        LOGGER.error({ err: err }, "Error Response from Outbound Hook Request");
-        if (retry_count <= 0) {
-            // done with error
-            LOGGER.error({ err: err }, "Exhausted retries");
-            return d.reject(SIS.ERR_INTERNAL(err));
-        }
-        // retry
-        setTimeout(function() {
-            sendRequest(options, retry_count - 1, delay, d);
-        }, delay * 1000);
-    });
+    }
 };
 
+// Send the event to the hook.  Resolves with the response body.
 var dispatchHook = function(hook, entity, event, isBulk) {
     // This check will never be true
     if (typeof entity.toObject === 'function') {
@@ -127,9 +130,7 @@ var dispatchHook = function(hook, entity, event, isBulk) {
         options.body = JSON.stringify(data);
         LOGGER.info({ payload: data }, "Hook payload: ");
     }
-    var d = P.defer();
-    sendRequest(options, hook.retry_count || 0, hook.retry_delay || 1, d);
-    return d.promise;
+    return sendRequest(options, hook.retry_count || 0, hook.retry_delay || 1);
 };
 
 // Hook dispatches run after the write's response is sent. Their lookups of the
@@ -147,53 +148,36 @@ function trackLookup(lookup) {
     return lookup;
 }
 
-// hook dispatching methods
-HookManager.prototype.dispatchHooks = function(entity, entity_type, event, isBulk, callback) {
-    if (!callback) {
-        callback = function(err) {
-            if (err) {
-                LOGGER.error({ err: err }, "Error running hooks");
-            }
-        };
-    }
-    // find hooks that have the entity_type w/ the
-    // event
-    var query = {"entity_type" : entity_type, "events" :  event };
-    trackLookup(Promise.resolve(this.model.find(query, null, { lean : true }).exec()))
-    .then(function(hooks) {
-        var promises = hooks.map(function(hook) {
+// Send the event to the hooks of entity_type that want it.  Resolves with
+// the hooks' response bodies - or null if a hook failed, which is logged.
+// Callers do not wait for this, so it never rejects.
+HookManager.prototype.dispatchHooks = async function(entity, entity_type, event, isBulk) {
+    var query = { "entity_type" : entity_type, "events" : event };
+    try {
+        var hooks = await trackLookup(Promise.resolve(this.model.find(query, null, { lean : true }).exec()));
+        return await Promise.all(hooks.map(function(hook) {
             return dispatchHook(hook, entity, event, isBulk);
-        });
-        return Promise.all(promises).then(function(res) {
-            callback(null, res);
-        });
-    }).catch(function(err) {
-        callback(err, null);
-    });
+        }));
+    } catch (err) {
+        LOGGER.error({ err: err }, "Error running hooks");
+        return null;
+    }
 };
 
 // force trigger
-HookManager.prototype.triggerHooks = function(entityType, entityId, opts) {
-    var self = this;
+HookManager.prototype.triggerHooks = async function(entityType, entityId, opts) {
     opts = opts || { };
-    return self.sm.getEntityManager(entityType)
-    .then(function(mgr) {
-        // get the entity by ID
-        opts.lean = mgr.model.schema._sis_defaultpaths.length === 0;
-        return mgr.getById(entityId);
-    }).then(function(entity) {
-        // trigger an update - which is an array of length 2
-        // for old and new
-        //LOGGER.info({entity: entity},"Dispatching hooks for "+entityType+" with id "+entityId);
-
-        var obj = [entity, entity];
-        self.dispatchHooks(obj, entityType, SIS.EVENT_UPDATE, false);
-        return {
-            message: "Hooks triggered successfully",
-            type: entityType,
-            entity: entity
-        };
-    });
+    var mgr = await this.sm.getEntityManager(entityType);
+    opts.lean = mgr.model.schema._sis_defaultpaths.length === 0;
+    var entity = await mgr.getById(entityId);
+    // trigger an update - which is an array of length 2
+    // for old and new
+    this.dispatchHooks([entity, entity], entityType, SIS.EVENT_UPDATE, false);
+    return {
+        message: "Hooks triggered successfully",
+        type: entityType,
+        entity: entity
+    };
 };
 
 module.exports = function(schemaManager, opts) {
