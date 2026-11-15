@@ -128,6 +128,18 @@ describe('@API @V1.1API - Upsert', function() {
                 .query({ upsert : true }).send(entity).expect(201, done);
         });
 
+        it("Should report why an existing entity could not be updated", function(done) {
+            // foobar exists, so a failed update must not fall back to an add
+            var entity = { name : "foobar", other : "changed" };
+            ApiServer.put("/api/v1.1/entities/test_upsert_2/foobar")
+            .query({ upsert : true, cas : JSON.stringify({ other : "not_foobar" }) })
+            .send(entity).expect(400, function(err, res) {
+                should.not.exist(err);
+                res.body.error.should.match(/CAS update failed/);
+                done();
+            });
+        });
+
     });
 
 });

@@ -187,6 +187,21 @@ describe('@API @V1.1API - Bulk Insert API', function() {
             });
     });
 
+    it("should report what was added when items also fail validation", function(done) {
+        // 3000 was added above, "abc" is not a number, 6000 is new
+        var items = [{ num : 3000 }, { num : "abc" }, { num : 6000 }];
+        ApiServer.post("/api/v1.1/entities/" + schema.name)
+            .query({ all_or_none : false })
+            .send(items)
+            .expect(200, function(err, res) {
+                should.not.exist(err);
+                res.body.success.map(function(s) { return s.num; }).should.eql([6000]);
+                res.body.errors.length.should.eql(2);
+                res.body.errors.map(function(e) { return e.value.num; }).should.containDeep([3000]);
+                verifyItems(6000, 1, res.body.success, done);
+            });
+    });
+
     describe("with Auth failures", function() {
         var users = AuthFixture.createUsers();
         var userToTokens = { };

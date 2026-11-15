@@ -1,7 +1,6 @@
 
 'use strict';
 
-var P = require("./promises");
 var SIS = require('./constants');
 var jsondiffpatch = require("jsondiffpatch");
 var crypto = require("crypto");
@@ -53,9 +52,8 @@ Manager.prototype.applyUpdate = function(doc, updateObj) {
 
 // A call that indicates the specified object has been removed
 // Returns a promise with the object removed.
-Manager.prototype.objectRemoved = function(obj) {
-    // default just returns a fullfilled promise
-    return Promise.resolve(obj);
+Manager.prototype.objectRemoved = async function(obj) {
+    return obj;
 };
 
 Manager.prototype._getDefaultOptions = function(options) {
@@ -82,26 +80,23 @@ Manager.prototype._getFindOptions = function(options) {
 
 /** Common methods - rare to override these **/
 // Get a single object that has certain properties.
-Manager.prototype.getSingleByCondition = function(condition, name, options) {
-    var self = this;
-    return Promise.resolve(self.model.findOne(condition, null, self._getFindOptions(options)).exec())
-    .then(function(result) {
-        if (!result) {
-            return Promise.reject(SIS.ERR_NOT_FOUND(self.type, name));
-        }
-        return Promise.resolve(result);
-    })
-    .catch(function(err) {
+Manager.prototype.getSingleByCondition = async function(condition, name, options) {
+    var result;
+    try {
+        result = await this.model.findOne(condition, null, this._getFindOptions(options)).exec();
+    } catch (err) {
         if (err instanceof Array) {
-            return Promise.reject(err);
+            throw err;
         }
         if (err.name == "CastError") {
-            err = SIS.ERR_NOT_FOUND(self.type, name);
-        } else {
-            err = SIS.ERR_INTERNAL(err);
+            throw SIS.ERR_NOT_FOUND(this.type, name);
         }
-        return Promise.reject(err);
-    });
+        throw SIS.ERR_INTERNAL(err);
+    }
+    if (!result) {
+        throw SIS.ERR_NOT_FOUND(this.type, name);
+    }
+    return result;
 };
 
 // get a single object by id.
@@ -111,60 +106,45 @@ Manager.prototype.getById = function(id, options) {
 };
 
 // get all the objects belonging to the model.
-Manager.prototype.getAll = function(condition, options, fields) {
-    return Promise.resolve(this.model.find(condition, fields, this._getFindOptions(options)).exec());
+Manager.prototype.getAll = async function(condition, options, fields) {
+    return this.model.find(condition, fields, this._getFindOptions(options)).exec();
 };
 
 // Count the number of objects specified by the query
-Manager.prototype.count = function(condition, callback) {
-    var self = this;
-    if (!Object.keys(condition)) {
-        condition = undefined;
+// Resolves with [count, condition, manager] - a failed count is 0.
+Manager.prototype.count = async function(condition) {
+    var count = 0;
+    try {
+        count = await this.model.countDocuments(condition || { }).exec();
+    } catch (err) {
+        count = 0;
     }
-    return Promise.resolve(self.model.countDocuments(condition || { }).exec())
-        .then(function(count) {
-            return [count, condition, self];
-        }).catch(function(err) {
-            return [0, condition, self];
-        });
+    return [count, condition, this];
 };
 
-Manager.prototype.getPopulateFields = function(schemaManager, subList) {
+// Resolves with the space separated paths to populate, or null if there
+// are none.  subList limits the paths to the ones listed in it.
+Manager.prototype.getPopulateFields = async function(schemaManager, subList) {
     var schemaNameToPaths = this._getPopulateFields();
     if (!schemaNameToPaths) {
-        return Promise.resolve(null);
+        return null;
     }
-    // ensure the schemas exist
-    var schemasToLoad = Object.keys(schemaNameToPaths)
-        .filter(function(schemaName) {
-            return !schemaManager.hasEntityModel(schemaName);
-        });
-
-    if (!schemasToLoad.length) {
-        var fields = this._getFieldsFromPopulateObject(schemaNameToPaths, subList);
-        return Promise.resolve(fields);
-    } else {
-        var self = this;
-        // need to try loading up some schemas
-        // as they may be available due to DB replication
-        var loadPromises = schemasToLoad.map(function(schemaName) {
-            return schemaManager.getEntityModelAsync(schemaName).then(function() {
-                return schemaName;
-            }).catch(function() {
-                delete schemaNameToPaths[schemaName];
-                return schemaName;
-            });
-        });
-        return Promise.all(loadPromises).then(function() {
-            var loadedSchemas = Object.keys(schemaNameToPaths);
-            if (!loadedSchemas.length) {
-                return null;
-            } else {
-                var fields = self._getFieldsFromPopulateObject(schemaNameToPaths, subList);
-                return fields;
-            }
-        });
+    // referenced schemas that are not loaded yet may still be available
+    // due to DB replication - try loading them and drop the ones that aren't
+    var schemasToLoad = Object.keys(schemaNameToPaths).filter(function(schemaName) {
+        return !schemaManager.hasEntityModel(schemaName);
+    });
+    await Promise.all(schemasToLoad.map(async function(schemaName) {
+        try {
+            await schemaManager.getEntityModelAsync(schemaName);
+        } catch (err) {
+            delete schemaNameToPaths[schemaName];
+        }
+    }));
+    if (!Object.keys(schemaNameToPaths).length) {
+        return null;
     }
+    return this._getFieldsFromPopulateObject(schemaNameToPaths, subList);
 };
 
 Manager.prototype._commonAuth = function(evt, doc, user, mergedDoc) {
@@ -187,7 +167,7 @@ Manager.prototype._commonAuth = function(evt, doc, user, mergedDoc) {
             // ensure only sis meta immutable is being changed
             diff = jsondiffpatch.diff(docMeta, mergeMeta) || { };
             changedKeys = Object.keys(diff);
-            if (changedKeys.length != 1 && changedKeys[0] != SIS.FIELD_IMMUTABLE) {
+            if (changedKeys.length != 1 || changedKeys[0] != SIS.FIELD_IMMUTABLE) {
                 return SIS.ERR_BAD_CREDS("Cannot change an immutable object unless only changing immutable state");
             }
         }
@@ -204,274 +184,240 @@ Manager.prototype._canOperate = function(doc, user) {
 };
 
 // Authorize a user to operate on a particular document
-// if evt is SIS.EVENT_UPDATE, mergedDoc is the updated object
-// otherwise doc is the object being added/deleted
-Manager.prototype.authorize = function(evt, doc, user, mergedDoc) {
+// if evt is SIS.EVENT_UPDATE, mergedDoc is the updated object and is
+// what this resolves with; otherwise doc is the object being added/deleted
+Manager.prototype.authorize = async function(evt, doc, user, mergedDoc) {
     var commonErr = this._commonAuth(evt, doc, user, mergedDoc);
     if (commonErr) {
-        return Promise.reject(commonErr);
+        throw commonErr;
     }
-
-    // check for any owner can modify privileges
-    var canOperateOnDoc = this._canOperate(doc, user);
-    if (!canOperateOnDoc) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("Insufficient permissions on source document."));
+    if (!this._canOperate(doc, user)) {
+        throw SIS.ERR_BAD_CREDS("Insufficient permissions on source document.");
     }
     if (evt !== SIS.EVENT_UPDATE) {
-        return Promise.resolve(doc);
+        return doc;
     }
-    canOperateOnDoc = this._canOperate(mergedDoc, user);
-    if (!canOperateOnDoc) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("Insufficient permissisons on update object."));
+    if (!this._canOperate(mergedDoc, user)) {
+        throw SIS.ERR_BAD_CREDS("Insufficient permissisons on update object.");
     }
-    return Promise.resolve(mergedDoc);
+    return mergedDoc;
 };
 
 // Ensures the user can add the object and then add it
-Manager.prototype.add = function(obj, options) {
-    var self = this;
-    // default to v1
-    options = self._getDefaultOptions(options);
+Manager.prototype.add = async function(obj, options) {
+    options = this._getDefaultOptions(options);
     var user = options.user;
-    var err = self.validate(obj, null, options);
+    var err = this.validate(obj, null, options);
     if (err) {
-        return Promise.reject(SIS.ERR_BAD_REQ(err));
+        throw SIS.ERR_BAD_REQ(err);
     }
     obj = SIS.ENSURE_SIS_META(obj);
-    var p = self.authorize(SIS.EVENT_INSERT, obj, user)
-        .then(self._addByFields(user, SIS.EVENT_INSERT))
-        .then(self.preAdd.bind(self))
-        .then(self._preSave.bind(self))
-        .then(self._save.bind(self));
-    return p;
+    var authorized = await this.authorize(SIS.EVENT_INSERT, obj, user);
+    var doc = await this._addByFields(user, SIS.EVENT_INSERT)(authorized);
+    doc = await this.preAdd(doc);
+    doc = await this._preSave(doc);
+    return this._save(doc);
 };
 
-
-Manager.prototype.bulkAdd = function(items, options) {
-    var self = this;
-    options = self._getDefaultOptions(options);
-    var collection = self.model.collection;
+// Add many objects at once.  Resolves with { success, errors } where
+// errors are { err, value }.  With options.allOrNone, nothing is added
+// unless everything can be.  If the insert itself partially fails,
+// internalErr holds the error the database gave.
+Manager.prototype.bulkAdd = async function(items, options) {
+    options = this._getDefaultOptions(options);
     var user = options.user;
     var allOrNone = options.allOrNone;
     var memo = { success: [], errors: [] };
-    var toAdd = [];
-    var batch = collection.initializeUnorderedBulkOp();
-    var numToAdd = 0;
+    // every inserted item is tagged with the transaction so the ones that
+    // made it in can be found (and removed for allOrNone) after a failure
     var transactionId = crypto.randomBytes(8).toString('hex') + Date.now();
     var transactionCond = { };
     transactionCond[SIS.FIELD_SIS_META + "." + SIS.FIELD_TRANSACTION_ID + ".id"] = transactionId;
-    var transactionIdxField = [SIS.FIELD_SIS_META, SIS.FIELD_TRANSACTION_ID, 'idx'].join(".");
+
+    // validate and authorize each item
     var authorized = [];
-    var authPromises = items.map(function(item, idx) {
-        var err = self.validate(item, null, options);
+    await Promise.all(items.map(async (item) => {
+        var err = this.validate(item, null, options);
         if (err) {
-            err = SIS.ERR_BAD_REQ(err);
-            memo.errors.push({ err : err, value : item });
-            return Promise.resolve(memo);
+            memo.errors.push({ err : SIS.ERR_BAD_REQ(err), value : item });
+            return;
         }
         item = SIS.ENSURE_SIS_META(item);
-        return self.authorize(SIS.EVENT_INSERT, item, user)
-            .then(self._addByFields(user, SIS.EVENT_INSERT))
-            .then(self.preAdd.bind(self))
-            .then(function(item) {
-                authorized.push(item);
-                return memo;
-            }).catch(function(err) {
-                memo.errors.push({ err : err, value : item });
-                return memo;
-            });
-    });
-    var insertPromise = Promise.all(authPromises)
-    .then(function() {
-        return self._preSaveBulk(authorized);
-    }).then(P.spread(function(items, errors) {
-        // concat in place
-        [].push.apply(memo.errors, errors);
-        // fill out the toAdd array and validate model
-        var modelValidatePromises = items.map(function(res, idx) {
-            // convert to mongoose obj
-            var doc = new self.model(res);
-            return Promise.resolve(doc.validate()).then(function() {
-                res = doc.toObject();
-                // add the pre save
-                self.applyPreSaveFields(res);
-                // add the transaction field in case
-                // we need to nuke them later
-                res[SIS.FIELD_SIS_META][SIS.FIELD_TRANSACTION_ID] = {
-                    id : transactionId,
-                    idx : idx
-                };
-                toAdd.push(res);
-                batch.insert(res);
-                return memo;
-            }).catch(function(err) {
-                err = SIS.ERR_BAD_REQ(err);
-                memo.errors.push({ err : err, value : doc.toObject() });
-                return memo;
-            });
-        });
-        return Promise.all(modelValidatePromises).then(function() {
-            return memo;
-        });
+        try {
+            var doc = await this.authorize(SIS.EVENT_INSERT, item, user);
+            doc = await this._addByFields(user, SIS.EVENT_INSERT)(doc);
+            authorized.push(await this.preAdd(doc));
+        } catch (e) {
+            memo.errors.push({ err : e, value : item });
+        }
     }));
 
-    // helper for the insert failure case
-    var handleInsertFailed = function(bulkResult, err) {
-        // some things failed..
-        // find the ones that failed
-        if (err) {
-            memo.internalErr = SIS.ERR_INTERNAL(err);
+    var preSaved = await this._preSaveBulk(authorized);
+    memo.errors.push.apply(memo.errors, preSaved[1]);
+
+    // validate against the model and queue the inserts
+    var toAdd = [];
+    var batch = this.model.collection.initializeUnorderedBulkOp();
+    await Promise.all(preSaved[0].map(async (res, idx) => {
+        var doc = new this.model(res);
+        try {
+            await doc.validate();
+        } catch (err) {
+            memo.errors.push({ err : SIS.ERR_BAD_REQ(err), value : doc.toObject() });
+            return;
         }
-        // populate errors
-        return self.getAll(transactionCond, {lean: true}).then(function(added) {
-            var success = [];
-            var addedIndexes = added.reduce(function(ret, item) {
-                ret[item[SIS.FIELD_SIS_META][SIS.FIELD_TRANSACTION_ID].idx] = item;
-                return ret;
-            }, {});
-            var insertFail = SIS.ERR_BAD_REQ("Insert failed");
-            toAdd.forEach(function(item, idx) {
-                if (!(idx in addedIndexes)) {
-                    // failed
-                    memo.errors.push({
-                        value : item,
-                        err : insertFail
-                    });
-                } else {
-                    // success
-                    success.push(item);
-                }
-            });
-            if (!allOrNone) {
-                memo.success = success;
-                return memo;
-            }
-            // nuke the ones that have our transaction
-            return Promise.resolve(self.model.deleteMany(transactionCond).exec()).then(function() {
-                return memo;
-            }).catch(function(e) {
-                // sigh
-                var msg = "Error deleting entries per allOrNone: " + SIS.FIELD_TRANSACTION_ID + ".id = " + transactionId;
-                return Promise.reject(SIS.ERR_INTERNAL(msg));
-            });
-        });
-    };
-
-    // do the insert
-    return insertPromise.then(function() {
-        if ((allOrNone && memo.errors.length) || !toAdd.length) {
-            // bail - nothing inserted yet or nothing to insert
-            return memo;
-        }
-        // do the bulk insert.  The modern driver resolves execute() with a
-        // BulkWriteResult and rejects with a MongoBulkWriteError (whose .result
-        // holds the partial BulkWriteResult) when some writes fail.
-        return Promise.resolve(batch.execute()).then(function(bulkResult) {
-            if (bulkResult.ok && bulkResult.insertedCount === toAdd.length) {
-                // g2g - everything we wanted to add was added.
-                // insertedIds is an index -> _id map
-                var insertedIds = bulkResult.insertedIds || { };
-                Object.keys(insertedIds).forEach(function(idx) {
-                    toAdd[idx]._id = insertedIds[idx];
-                });
-                memo.success = toAdd;
-                return memo;
-            }
-            return handleInsertFailed(bulkResult, null);
-        }).catch(function(err) {
-            var bulkResult = err && err.result ? err.result : null;
-            if (!bulkResult) {
-                return Promise.reject(SIS.ERR_INTERNAL(err));
-            }
-            return handleInsertFailed(bulkResult, err);
-        });
-
-    });
-};
-
-Manager.prototype._update = function(id, obj, options, saveFunc) {
-    var self = this;
-    return self.getById(id, { lean : true })
-    .then(function(found) {
-        // validate
-        var err = self.validate(obj, found, options);
-        if (err) {
-            return Promise.reject(SIS.ERR_BAD_REQ(err));
-        }
-        // this check should still work for entities since idField is _id and
-        // it is removed from the object in the validate method.
-        // this needs to be cleaned since this is a case of a superclass
-        // getting lucky because of subclass behavior
-        if (self.idField in obj && found[self.idField] != obj[self.idField]) {
-            err = SIS.ERR_BAD_REQ(self.idField + " cannot be changed.");
-            return Promise.reject(err);
-        }
-        return [found, null];
-    }).then(P.spread(function(converted, old) {
-        // init the mongoose doc - must use .init per comment in mongoose
-        // otherwise there are problems like _id mod errors from mongo
-        // reference the old raw document
-        var found = new self.model();
-        found.init(converted, { });
-        found.isNew = false;
-
-        var oldV11 = found.toObject();
-        var user = options.user;
-
-        // always convert the obj to V1.1
-        obj = SIS.ENSURE_SIS_META(obj);
-
-        // update metas
-        // set meta fields
-        var currentMeta = oldV11[SIS.FIELD_SIS_META] || { };
-        var updateMeta = obj[SIS.FIELD_SIS_META] || { };
-
-        SIS.MUTABLE_META_FIELDS.forEach(function(k) {
-            if (k in updateMeta) {
-                found[SIS.FIELD_SIS_META][k] = updateMeta[k];
-            }
-        });
-
-        return self._merge(found, obj, options)
-        .then(function(merged) {
-            return self.authorize(SIS.EVENT_UPDATE, oldV11, user, merged);
-        })
-        .then(self._addByFields(user, SIS.EVENT_UPDATE))
-        .then(self._preSave.bind(self))
-        .then(saveFunc)
-        .then(function(updated) {
-            return self.finishUpdate(oldV11, updated);
-        })
-        .then(function(updated) {
-            // return
-            return Promise.resolve([oldV11, updated, old]);
-        });
+        res = doc.toObject();
+        this.applyPreSaveFields(res);
+        res[SIS.FIELD_SIS_META][SIS.FIELD_TRANSACTION_ID] = {
+            id : transactionId,
+            idx : idx
+        };
+        toAdd.push(res);
+        batch.insert(res);
     }));
+
+    if ((allOrNone && memo.errors.length) || !toAdd.length) {
+        // bail - nothing inserted yet or nothing to insert
+        return memo;
+    }
+
+    // The modern driver resolves execute() with a BulkWriteResult and rejects
+    // with a MongoBulkWriteError (whose .result holds the partial
+    // BulkWriteResult) when some writes fail.
+    var bulkResult;
+    try {
+        bulkResult = await batch.execute();
+    } catch (err) {
+        if (!(err && err.result)) {
+            throw SIS.ERR_INTERNAL(err);
+        }
+        memo.internalErr = SIS.ERR_INTERNAL(err);
+        return this._bulkAddFailed(memo, toAdd, transactionCond, allOrNone);
+    }
+    if (!(bulkResult.ok && bulkResult.insertedCount === toAdd.length)) {
+        return this._bulkAddFailed(memo, toAdd, transactionCond, allOrNone);
+    }
+    // everything we wanted to add was added.
+    // insertedIds maps the index in the batch to the _id
+    var insertedIds = bulkResult.insertedIds || { };
+    Object.keys(insertedIds).forEach(function(idx) {
+        toAdd[idx]._id = insertedIds[idx];
+    });
+    memo.success = toAdd;
+    return memo;
 };
 
-Manager.prototype.finishUpdate = function(old, updated) {
-    return Promise.resolve(updated);
+// Some of a bulk add's inserts failed - find out which ones from what the
+// database holds for the transaction.  With allOrNone, remove the rest.
+Manager.prototype._bulkAddFailed = async function(memo, toAdd, transactionCond, allOrNone) {
+    var added = await this.getAll(transactionCond, { lean : true });
+    var addedIdxs = new Set(added.map(function(item) {
+        return item[SIS.FIELD_SIS_META][SIS.FIELD_TRANSACTION_ID].idx;
+    }));
+    var insertFail = SIS.ERR_BAD_REQ("Insert failed");
+    var success = [];
+    toAdd.forEach(function(item) {
+        // match on the transaction idx - not the position in toAdd, which
+        // differs once an item has failed validation
+        if (addedIdxs.has(item[SIS.FIELD_SIS_META][SIS.FIELD_TRANSACTION_ID].idx)) {
+            success.push(item);
+        } else {
+            memo.errors.push({ value : item, err : insertFail });
+        }
+    });
+    if (!allOrNone) {
+        memo.success = success;
+        return memo;
+    }
+    try {
+        await this.model.deleteMany(transactionCond).exec();
+    } catch (e) {
+        var msg = "Error deleting entries per allOrNone: " + SIS.FIELD_TRANSACTION_ID + ".id = " +
+            transactionCond[SIS.FIELD_SIS_META + "." + SIS.FIELD_TRANSACTION_ID + ".id"];
+        throw SIS.ERR_INTERNAL(msg);
+    }
+    return memo;
 };
 
-Manager.prototype._getCasSave = function(obj, cas) {
-    var self = this;
-    return function(doc) {
-        return Promise.resolve(doc.validate()).then(function() {
-            // set the ID on the id field
-            cas[self.idField] = doc[self.idField];
-            obj = SIS.ENSURE_SIS_META(obj);
-            // find and update
-            // need to add the update time
-            self.applyPreSaveFields(obj);
-            return Promise.resolve(self.model.findOneAndUpdate(cas, obj, { 'new' : true }).exec())
-            .then(function(doc) {
-                if (!doc) {
-                    // cas update failed
-                    return Promise.reject(SIS.ERR_BAD_REQ("CAS update failed."));
-                }
-                return doc;
-            });
-        });
+// Update the object with the given id using saveFunc to persist it.
+// Resolves with [old, updated, null] where old is the object before the
+// update (a plain object) and updated is what saveFunc and finishUpdate
+// resolved with.
+Manager.prototype._update = async function(id, obj, options, saveFunc) {
+    var converted = await this.getById(id, { lean : true });
+    var err = this.validate(obj, converted, options);
+    if (err) {
+        throw SIS.ERR_BAD_REQ(err);
+    }
+    // this check should still work for entities since idField is _id and
+    // it is removed from the object in the validate method.
+    // this needs to be cleaned since this is a case of a superclass
+    // getting lucky because of subclass behavior
+    if (this.idField in obj && converted[this.idField] != obj[this.idField]) {
+        throw SIS.ERR_BAD_REQ(this.idField + " cannot be changed.");
+    }
+
+    // init the mongoose doc - must use .init per comment in mongoose
+    // otherwise there are problems like _id mod errors from mongo
+    var found = new this.model();
+    found.init(converted, { });
+    found.isNew = false;
+
+    var oldV11 = found.toObject();
+    var user = options.user;
+
+    // always convert the obj to V1.1
+    obj = SIS.ENSURE_SIS_META(obj);
+
+    // the meta fields starting with _ (such as _created_by) are kept by SIS,
+    // so an update can not set them
+    var updateMeta = obj[SIS.FIELD_SIS_META];
+    Object.keys(updateMeta).forEach(function(k) {
+        if (k[0] === '_') {
+            delete updateMeta[k];
+        }
+    });
+
+    // set the mutable meta fields
+    SIS.MUTABLE_META_FIELDS.forEach(function(k) {
+        if (k in updateMeta) {
+            found[SIS.FIELD_SIS_META][k] = updateMeta[k];
+        }
+    });
+
+    var merged = await this._merge(found, obj, options);
+    var doc = await this.authorize(SIS.EVENT_UPDATE, oldV11, user, merged);
+    doc = await this._addByFields(user, SIS.EVENT_UPDATE)(doc);
+    doc = await this._preSave(doc);
+    var updated = await saveFunc(doc);
+    updated = await this.finishUpdate(oldV11, updated);
+    return [oldV11, updated, null];
+};
+
+Manager.prototype.finishUpdate = async function(old, updated) {
+    return updated;
+};
+
+// Returns a save function for _update that saves the updated document
+// like _save, but only if the stored object still matches the cas condition
+Manager.prototype._getCasSave = function(cas) {
+    return async (doc) => {
+        // save filters on $where as is, so cast it like a query would be
+        // (cas values from the query string are strings)
+        try {
+            doc.$where = this.model.find().cast(this.model, cas);
+        } catch (err) {
+            throw SIS.ERR_BAD_REQ(err);
+        }
+        this.applyPreSaveFields(doc);
+        try {
+            return await doc.save();
+        } catch (err) {
+            if (err && err.name == "DocumentNotFoundError") {
+                throw SIS.ERR_BAD_REQ("CAS update failed.");
+            }
+            throw this._mapModError(err);
+        }
     };
 };
 
@@ -479,19 +425,19 @@ Manager.prototype.canInsertWithId = function(id, obj) {
     return obj[this.idField] == id;
 };
 
-Manager.prototype.upsert = function(id, obj, options) {
-    var self = this;
-    options = self._getDefaultOptions(options);
-    // get by id first
-    return self.getById(id, { lean : true }).then(function(found) {
-        return self.update(id, obj, options);
-    }).catch(function(err) {
-        // add it
-        if (!self.canInsertWithId(id, obj)) {
-            return Promise.reject(SIS.ERR_BAD_REQ("Cannot insert object with specified ID"));
+// Update the object if it exists, otherwise add it.  Resolves with what
+// update or add resolved with.
+Manager.prototype.upsert = async function(id, obj, options) {
+    options = this._getDefaultOptions(options);
+    try {
+        await this.getById(id, { lean : true });
+    } catch (err) {
+        if (!this.canInsertWithId(id, obj)) {
+            throw SIS.ERR_BAD_REQ("Cannot insert object with specified ID");
         }
-        return self.add(obj, options);
-    });
+        return this.add(obj, options);
+    }
+    return this.update(id, obj, options);
 };
 
 // Ensures the user can update the object and then update it
@@ -501,169 +447,114 @@ Manager.prototype.update = function(id, obj, options) {
     var saveFunc = this._save.bind(this);
     // if cas, use the cas save rather than generic save
     if (cas) {
-        saveFunc = this._getCasSave(obj, cas);
+        saveFunc = this._getCasSave(cas);
     }
     return this._update(id, obj, options, saveFunc);
 };
 
+// Update every object matching condition with obj.  Resolves with
+// { success, errors } where success holds [old, updated] pairs.
 // Note bulk updates are horribly inefficient at the moment
-Manager.prototype.bulkUpdateQuery = function(condition, obj, options) {
-    var self = this;
-    var user = options.user;
-    var memo = { success : [], errors : [] };
-    return self.getAll(condition, { lean : true }, self.idField)
-    .then(function(items) {
-        if (!items.length) {
-            return memo;
-        }
-        // for now just try to update it all
-        return Promise.all((items).map(function(item) {
-            return self.update(item[self.idField], obj, options)
-            .then(function(result) {
-                memo.success.push([result[0],result[1]]);
-            }).catch(function(err) {
-                memo.errors.push({
-                    err : err,
-                    value : item
-                });
-            });
-        })).then(function() {
-            return memo;
-        });
-    });
+Manager.prototype.bulkUpdateQuery = async function(condition, obj, options) {
+    var items = await this.getAll(condition, { lean : true }, this.idField);
+    return this._updateEach(items, function(item) { return [item[this.idField], obj]; }, options);
 };
 
+// Update each object in items, identified by its id field.  Resolves with
+// { success, errors } where success holds [old, updated] pairs.
 Manager.prototype.bulkUpdateArray = function(items, options) {
-    var user = options.user;
+    return this._updateEach(items, function(item) { return [item[this.idField], item]; }, options);
+};
+
+// Run update for each item - getUpdate maps an item to [id, obj]
+Manager.prototype._updateEach = async function(items, getUpdate, options) {
     var memo = { success : [], errors : [] };
-    if (!items.length) {
-        return Promise.resolve(memo);
-    }
-    var self = this;
-    return Promise.all((items).map(function(item) {
-        if (!item[self.idField]) {
-            memo.errors.push({
-                err : SIS.ERR_BAD_REQ("Missing ID field in bulk update"),
-                value : item
-            });
-            return memo;
+    await Promise.all(items.map(async (item) => {
+        var update = getUpdate.call(this, item);
+        if (!update[0]) {
+            memo.errors.push({ err : SIS.ERR_BAD_REQ("Missing ID field in bulk update"), value : item });
+            return;
         }
-        return self.update(item[self.idField], item, options)
-        .then(function(result) {
-            memo.success.push([result[0],result[1]]);
-        }).catch(function(err) {
-            memo.errors.push({
-                err : err,
-                value : item
-            });
-        });
-    })).then(function() {
-        return memo;
-    });
+        try {
+            var result = await this.update(update[0], update[1], options);
+            memo.success.push([result[0], result[1]]);
+        } catch (err) {
+            memo.errors.push({ err : err, value : item });
+        }
+    }));
+    return memo;
 };
 
-// Ensures the user can delete the object and then delete it
-Manager.prototype.delete = function(id, options) {
-    var self = this;
-    options = self._getDefaultOptions(options);
-    var user = options.user;
-    var p = self.getById(id, { lean : true }).then(function(obj) {
-            obj = SIS.ENSURE_SIS_META(obj);
-            return self.authorize(SIS.EVENT_DELETE, obj, user);
-        })
-        .then(self._remove.bind(self))
-        .then(P.tap(self.objectRemoved.bind(self)));
-    return p;
+// Ensures the user can delete the object and then delete it.
+// Resolves with the deleted object.
+Manager.prototype.delete = async function(id, options) {
+    options = this._getDefaultOptions(options);
+    var obj = SIS.ENSURE_SIS_META(await this.getById(id, { lean : true }));
+    var authorized = await this.authorize(SIS.EVENT_DELETE, obj, options.user);
+    var removed = await this._remove(authorized);
+    await this.objectRemoved(removed);
+    return removed;
 };
 
-Manager.prototype.bulkDelete = function(condition, options) {
-    var self = this;
-    options = self._getDefaultOptions(options);
+// Delete every object matching condition.  Resolves with { success, errors }
+// where success holds what objectRemoved resolved with for each deleted object.
+Manager.prototype.bulkDelete = async function(condition, options) {
+    options = this._getDefaultOptions(options);
     var user = options.user;
     var memo = { success: [], errors: [] };
-    return self.getAll(condition, { lean: true })
-    .then(function(items) {
-        if (!items.length) {
-            return memo;
+    var items = await this.getAll(condition, { lean: true });
+
+    var toDelete = [];
+    await Promise.all(items.map(async (item) => {
+        item = SIS.ENSURE_SIS_META(item);
+        try {
+            toDelete.push(await this.authorize(SIS.EVENT_DELETE, item, user));
+        } catch (err) {
+            memo.errors.push({ err : err, value : item });
         }
-        var toDelete = [];
-        var authPromises = items.map(function(item) {
-            item = SIS.ENSURE_SIS_META(item);
-            return self.authorize(SIS.EVENT_DELETE, item, user)
-            .then(function(res) {
-                toDelete.push(res);
-                return memo;
-            }).catch(function(err) {
-                memo.errors.push({ err : err, value : item });
-                return memo;
-            });
-        });
-        // inner promise chain
-        return Promise.all(authPromises).then(function() {
-            if (!toDelete.length) {
-                memo.success = toDelete;
-                return memo;
-            }
-            var idsToDelete = toDelete.reduce(function(ret, i) {
-                ret[i._id] = i;
-                return ret;
-            }, { });
-            var idCondition = {};
-            idCondition._id = { $in : Object.keys(idsToDelete) };
-            return Promise.resolve(self.model.deleteMany(idCondition).exec())
-            .then(function(res) {
-                if (res.deletedCount == toDelete.length) {
-                    memo.success = toDelete;
-                    return memo;
-                }
-                // some issue occurred.. get the ones that weren't deleted
-                return self.getAll(idCondition, { lean : true }).then(function(res) {
-                    var errors = res.map(function(r) {
-                        delete idsToDelete[r._id];
-                        var err = SIS.ERR_INTERNAL("Could not delete.");
-                        return {
-                            err : err,
-                            value : r
-                        };
-                    });
-                    memo.success = Object.keys(idsToDelete).map(function(id) { return idsToDelete[id]; });
-                    memo.errors = memo.errors.concat(errors);
-                    return memo;
-                }).catch(function(err) {
-                    // ok.. totally hosed here.
-                    // error out
-                    return Promise.reject(SIS.ERR_INTERNAL(err));
-                });
-            }).catch(function(err) {
-                // removeAsync failed
-                return Promise.reject(SIS.ERR_INTERNAL(err));
-            });
-        }).then(function() {
-            if (!memo.success.length) {
-                return memo;
-            }
-            // trigger object removed
-            var newSuccess = [];
-            var triggers = memo.success.map(function(removed) {
-                return self.objectRemoved(removed).then(function(r) {
-                    newSuccess.push(r);
-                    return true;
-                }).catch(function(e) {
-                    // in a REALLY bad state here.
-                    // TODO: handle this error case
-                    memo.errors.push({
-                        err : e,
-                        value : removed
-                    });
-                    return false;
-                });
-            });
-            return Promise.all(triggers).then(function(){
-                memo.success = newSuccess;
-                return memo;
-            });
-        });
+    }));
+    if (!toDelete.length) {
+        return memo;
+    }
+
+    var idsToDelete = { };
+    toDelete.forEach(function(i) {
+        idsToDelete[i._id] = i;
     });
+    var idCondition = { _id : { $in : Object.keys(idsToDelete) } };
+    var res;
+    try {
+        res = await this.model.deleteMany(idCondition).exec();
+    } catch (err) {
+        throw SIS.ERR_INTERNAL(err);
+    }
+    var deleted = toDelete;
+    if (res.deletedCount != toDelete.length) {
+        // some issue occurred.. get the ones that weren't deleted
+        var remaining;
+        try {
+            remaining = await this.getAll(idCondition, { lean : true });
+        } catch (err) {
+            throw SIS.ERR_INTERNAL(err);
+        }
+        remaining.forEach(function(r) {
+            delete idsToDelete[r._id];
+            memo.errors.push({ err : SIS.ERR_INTERNAL("Could not delete."), value : r });
+        });
+        deleted = Object.values(idsToDelete);
+    }
+
+    // trigger object removed
+    await Promise.all(deleted.map(async (removed) => {
+        try {
+            memo.success.push(await this.objectRemoved(removed));
+        } catch (e) {
+            // in a REALLY bad state here.
+            // TODO: handle this error case
+            memo.errors.push({ err : e, value : removed });
+        }
+    }));
+    return memo;
 };
 
 // utils
@@ -782,13 +673,11 @@ Manager.prototype.applyPartial = function (full, partial) {
 };
 
 // Private methods
-// Return a promise that removes the document and returns the
-// document removed if successful
-Manager.prototype._remove = function(doc) {
+// Remove the document and resolve with it
+Manager.prototype._remove = async function(doc) {
     var q = {}; q[this.idField] = doc[this.idField];
-    return Promise.resolve(this.model.deleteOne(q).exec()).then(function() {
-        return doc;
-    });
+    await this.model.deleteOne(q).exec();
+    return doc;
 };
 
 // Map a mongoose save/validation error to a SIS error tuple
@@ -824,83 +713,75 @@ Manager.prototype._getFieldsFromPopulateObject = function(refToPaths, subList) {
     return paths.join(" ");
 };
 
-// returns a promise function that accepts a document from
-// find and applies the update
-Manager.prototype._merge = function(doc, update, options) {
-    return Promise.resolve(this.applyUpdate(doc, update, options));
+// Apply the update to a document from find and resolve with it
+Manager.prototype._merge = async function(doc, update, options) {
+    return this.applyUpdate(doc, update, options);
 };
 
 Manager.prototype.applyPreSaveFields = function(obj) {
     obj[SIS.FIELD_SIS_META][SIS.FIELD_UPDATED_AT] = Date.now();
 };
 
-// return a promise that returns
-// an a two element array
-// first elem is a success array
-// second elem is an error array where each
-// error has { err, value } fields
-Manager.prototype._preSaveBulk = function(objs) {
+// Run _preSave on each object.  Resolves with a two element array:
+// the objects that passed, and errors as { err, value }
+Manager.prototype._preSaveBulk = async function(objs) {
     var errors = [];
     var success = [];
-    var promises = objs.map(function(obj) {
-        return this._preSave(obj).then(function(obj) {
-            success.push(obj);
-            return obj;
-        }).catch(function(err) {
+    await Promise.all(objs.map(async (obj) => {
+        try {
+            success.push(await this._preSave(obj));
+        } catch (err) {
             errors.push({ value : obj, err : err });
-            return obj;
-        });
-    }.bind(this));
-    return Promise.all(promises).then(function() {
-        return [success, errors];
-    });
+        }
+    }));
+    return [success, errors];
 };
 
 // pre add hook that is called on inserts only
 // before the object is persisted
-Manager.prototype.preAdd = function(obj) {
-    return Promise.resolve(obj);
+Manager.prototype.preAdd = async function(obj) {
+    return obj;
 };
 
 // do one last bit of validation for subclasses
-Manager.prototype._preSave = function(obj) {
-    return Promise.resolve(obj);
+Manager.prototype._preSave = async function(obj) {
+    return obj;
 };
 
-// Save the object and return a promise that is fulfilled
-// with the saved document
-Manager.prototype._save = function(obj) {
+// Save the object and resolve with the saved document
+Manager.prototype._save = async function(obj) {
     if (!obj) {
-        return Promise.reject(SIS.ERR_BAD_REQ("invalid data"));
+        throw SIS.ERR_BAD_REQ("invalid data");
     }
     var m = obj;
     if (!(obj instanceof this.model)) {
         try {
             m = new this.model(obj);
         } catch (ex) {
-            return Promise.reject(SIS.ERR_BAD_REQ(ex));
+            throw SIS.ERR_BAD_REQ(ex);
         }
     }
     this.applyPreSaveFields(m);
-    var self = this;
-    return Promise.resolve(m.save()).catch(function(err) {
-        return Promise.reject(self._mapModError(err));
-    });
+    try {
+        return await m.save();
+    } catch (err) {
+        throw this._mapModError(err);
+    }
 };
 
-// Returns a function that receives a document and fills in
-// the _updated_by and _created_by fields
+// Returns a function that receives a document, fills in
+// the _updated_by and _created_by fields and resolves with it
 Manager.prototype._addByFields = function(user, event) {
-    return function(doc) {
+    return async function(doc) {
         if (!doc) {
-            return Promise.resolve(doc);
+            return doc;
         }
         var docMeta = doc[SIS.FIELD_SIS_META];
         if (event == SIS.EVENT_INSERT) {
             docMeta[SIS.FIELD_CREATED_AT] = Date.now();
         }
         if (!user) {
-            return Promise.resolve(doc);
+            return doc;
         }
 
         if (event == SIS.EVENT_UPDATE) {
@@ -909,7 +790,7 @@ Manager.prototype._addByFields = function(user, event) {
             docMeta[SIS.FIELD_CREATED_BY] = user[SIS.FIELD_NAME];
             docMeta[SIS.FIELD_UPDATED_BY] = user[SIS.FIELD_NAME];
         }
-        return Promise.resolve(doc);
+        return doc;
     };
 };
 
