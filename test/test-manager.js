@@ -357,6 +357,22 @@ describe('Manager', function() {
             (await mgr.authorize(SIS.EVENT_UPDATE, old, admin, merged)).should.equal(merged);
         });
 
+        [
+            ["the owner", { owner : ["g1", "g2"] }],
+            ["the tags", { tags : ["t1"] }],
+            ["the lock", { locked : true }],
+            ["the owner while clearing the immutable flag", { owner : ["g1", "g2"], immutable : false }]
+        ].forEach(function(change) {
+            it("rejects changing " + change[0] + " of an immutable object", async function() {
+                var old = new Model(item("a", 1)).toObject();
+                meta(old).immutable = true;
+                var merged = new Model(old);
+                Object.keys(change[1]).forEach(function(k) {
+                    meta(merged)[k] = change[1][k];
+                });
+                await expectError(mgr.authorize(SIS.EVENT_UPDATE, old, admin, merged), 401, /immutable/);
+            });
+        });
     });
 
     describe('add', function() {

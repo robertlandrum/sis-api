@@ -167,7 +167,7 @@ Manager.prototype._commonAuth = function(evt, doc, user, mergedDoc) {
             // ensure only sis meta immutable is being changed
             diff = jsondiffpatch.diff(docMeta, mergeMeta) || { };
             changedKeys = Object.keys(diff);
-            if (changedKeys.length != 1 && changedKeys[0] != SIS.FIELD_IMMUTABLE) {
+            if (changedKeys.length != 1 || changedKeys[0] != SIS.FIELD_IMMUTABLE) {
                 return SIS.ERR_BAD_CREDS("Cannot change an immutable object unless only changing immutable state");
             }
         }

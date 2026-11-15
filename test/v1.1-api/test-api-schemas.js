@@ -511,6 +511,30 @@ describe('@API @V1.1API - Schema API', function() {
            .send(obj).expect(401, done);
         });
 
+        [
+            ["owner", { owner : ["test", "test2"] }],
+            ["tags", { tags : ["t1"] }],
+            ["lock", { locked : true }],
+            ["owner while making it mutable", { owner : ["test", "test2"], immutable : false }]
+        ].forEach(function(change) {
+            it("Should fail to change only the " + change[0] + " of the schema", function(done) {
+                var obj = JSON.parse(JSON.stringify(schemaDoc));
+                Object.keys(change[1]).forEach(function(k) {
+                    obj._sis[k] = change[1][k];
+                });
+                ApiServer.put("/api/v1.1/schemas/" + schema.name)
+                .send(obj).expect(401, function(err) {
+                    if (err) { return done(err); }
+                    ApiServer.get("/api/v1.1/schemas/" + schema.name)
+                    .expect(200, function(err, res) {
+                        if (err) { return done(err); }
+                        res.body._sis.should.eql(schemaDoc._sis);
+                        done();
+                    });
+                });
+            });
+        });
+
         it("Should make the schema mutable", function(done) {
             var obj = JSON.parse(JSON.stringify(schemaDoc));
             obj._sis[SIS.FIELD_IMMUTABLE] = false;
