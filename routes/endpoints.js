@@ -23,11 +23,11 @@ var IDLE = 0,
 
 // small wrapper around the sandbox process
 // takes in a pending defer and resolves it
-// when done or should be killed
-function EndpointWorker(errHandler) {
+// when done or should be killed.  A worker that is not IDLE between
+// requests is broken, and the pool replaces it (see validate below).
+function EndpointWorker() {
     this.childproc = null;
     this.childState = DEAD;
-    this.errHandler = errHandler;
 
     // request being handled and callback
     // set per request
@@ -93,11 +93,40 @@ EndpointWorker.prototype.create = function() {
                 WORKER_LOGGER.error("Unexpected message while busy");
                 // message during a request
                 this.defer.reject({ error : "Unexpected message received. "});
-            } else {
-                // inform parent we should be cleaned up and removed from pool
-                this.errHandler(this);
-                // err handler will call destroy
             }
+            // an idle worker in the ERROR state is replaced when next taken
+        }
+    }.bind(this));
+    this.child.on("exit", function(code, signal) {
+        var state = this.childState;
+        if (state === DESTROYED) {
+            // we killed it
+            return;
+        }
+        LOGGER.error({ pid : this.child.pid, code : code, signal : signal }, "Script process exited");
+        this.childState = ERROR;
+        clearTimeout(this.reqTimer);
+        if (state === SPAWNING) {
+            clearTimeout(timer);
+            createDefer.reject({ error : "Script process exited while starting" });
+        } else if (state === BUSY) {
+            // fail the request now rather than when it times out
+            this.defer.reject({ error : "Script process exited", status : 500 });
+        }
+        // an idle worker is replaced when next taken
+    }.bind(this));
+    // e.g. sending to a process that just died.  Without a listener the
+    // error would end the server.
+    this.child.on("error", function(err) {
+        LOGGER.error({ err : err, pid : this.child.pid }, "Script process error");
+        var state = this.childState;
+        if (state === DESTROYED) {
+            return;
+        }
+        this.childState = ERROR;
+        clearTimeout(this.reqTimer);
+        if (state === BUSY) {
+            this.defer.reject({ error : "Script process failed", status : 500 });
         }
     }.bind(this));
     return createDefer.promise;
@@ -146,15 +175,11 @@ EndpointWorker.prototype.destroy = function() {
 function EndpointController(config) {
     this.requestQueue = [];
     this.authReads = !!config[SIS.OPT_AUTH_READS];
-    var self = this;
-    function errHandler(worker) {
-        self.workerPool.destroy(worker);
-    }
     // create the pool of workers.  generic-pool v3 uses a promise-based
     // factory + createPool() rather than the v2 callback style.
     var factory = {
         create : function() {
-            var worker = new EndpointWorker(errHandler);
+            var worker = new EndpointWorker();
             return worker.create();
         },
         destroy : function(worker) {
@@ -162,12 +187,17 @@ function EndpointController(config) {
                 worker.destroy();
             }
             return Promise.resolve();
+        },
+        // a worker whose process died or misbehaved while idle is replaced
+        validate : function(worker) {
+            return Promise.resolve(worker.childState === IDLE);
         }
     };
     this.workerPool = Pool.createPool(factory, {
         min : nconf.get("app:scripts_min") || 1,
         max : nconf.get("app:scripts_max") || 2,
-        idleTimeoutMillis : nconf.get("app:script_worker_idle_time_ms") || 300000
+        idleTimeoutMillis : nconf.get("app:script_worker_idle_time_ms") || 300000,
+        testOnBorrow : true
     });
     // v3 surfaces factory create failures via this event
     this.workerPool.on('factoryCreateError', function(err) {
@@ -216,10 +246,11 @@ EndpointController.prototype._runNext = function() {
             self.workerPool.release(worker);
         }).catch(function(err) {
             if (err instanceof Error) {
+                // the stack goes to the log, not to the client
                 LOGGER.error({ err: err }, "Endpoint caught an error");
                 err = {
                     status : 500,
-                    error : err + ": " + err.stack
+                    error : String(err)
                 };
             }
             // timeout or exception
@@ -229,7 +260,8 @@ EndpointController.prototype._runNext = function() {
             self.workerPool.destroy(worker);
         });
     }).catch(function(err) {
-        res.status(500).json({ error : "Unable to run script.  Internal error", e: err, status : 500 });
+        LOGGER.error({ err : err }, "Unable to get a script process");
+        res.status(500).json({ error : "Unable to run script.  Internal error", status : 500 });
     });
 };
 

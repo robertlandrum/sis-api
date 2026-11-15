@@ -257,5 +257,33 @@ describe("@API @V1.1API - Scripts API", function() {
             (await get("/").expect(200)).text.should.eql("ok");
         });
 
+        it("Should keep working after a script leaves a rejection unhandled", async function() {
+            (await get("/reject").expect(200)).text.should.eql("rejected");
+            (await get("/").expect(200)).text.should.eql("ok");
+        });
+
+        it("Should keep working after a script process dies", async function() {
+            if (process.env.SIS_REMOTE_URL) {
+                // the script processes are not ours to kill
+                return this.skip();
+            }
+            (await get("/").expect(200)).text.should.eql("ok");
+            let pids = require("child_process").execSync("pgrep -P " + process.pid + " -f endpoints/main.js || true")
+                .toString().split("\n").filter(Boolean);
+            pids.length.should.be.above(0);
+            pids.forEach(function(pid) { process.kill(Number(pid), "SIGKILL"); });
+            await new Promise(function(resolve) { setTimeout(resolve, 200); });
+            (await get("/").expect(200)).text.should.eql("ok");
+            (await get("/").expect(200)).text.should.eql("ok");
+        });
+
+        it("Should send script errors without the server's internals", async function() {
+            let res = await get("/throw").expect(500);
+            res.body.error.should.match(/TypeError: Cannot read properties of null/);
+            // where in the script it failed, but nothing about the server
+            res.body.error.should.match(/clienttest:\d+/);
+            res.body.error.should.not.match(/endpoints\/runner\.js|node:internal|\/node_modules\//);
+            (await get("/").expect(200)).text.should.eql("ok");
+        });
     });
 });
