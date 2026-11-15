@@ -390,21 +390,26 @@ Manager.prototype.finishUpdate = async function(old, updated) {
     return updated;
 };
 
-// Returns a save function for _update that only saves if the stored
-// object still matches the cas condition
-Manager.prototype._getCasSave = function(obj, cas) {
+// Returns a save function for _update that saves the updated document
+// like _save, but only if the stored object still matches the cas condition
+Manager.prototype._getCasSave = function(cas) {
     return async (doc) => {
-        await doc.validate();
-        // set the ID on the id field
-        cas[this.idField] = doc[this.idField];
-        obj = SIS.ENSURE_SIS_META(obj);
-        // need to add the update time
-        this.applyPreSaveFields(obj);
-        var updated = await this.model.findOneAndUpdate(cas, obj, { 'new' : true }).exec();
-        if (!updated) {
-            throw SIS.ERR_BAD_REQ("CAS update failed.");
+        // save filters on $where as is, so cast it like a query would be
+        // (cas values from the query string are strings)
+        try {
+            doc.$where = this.model.find().cast(this.model, cas);
+        } catch (err) {
+            throw SIS.ERR_BAD_REQ(err);
         }
-        return updated;
+        this.applyPreSaveFields(doc);
+        try {
+            return await doc.save();
+        } catch (err) {
+            if (err && err.name == "DocumentNotFoundError") {
+                throw SIS.ERR_BAD_REQ("CAS update failed.");
+            }
+            throw this._mapModError(err);
+        }
     };
 };
 
@@ -434,7 +439,7 @@ Manager.prototype.update = function(id, obj, options) {
     var saveFunc = this._save.bind(this);
     // if cas, use the cas save rather than generic save
     if (cas) {
-        saveFunc = this._getCasSave(obj, cas);
+        saveFunc = this._getCasSave(cas);
     }
     return this._update(id, obj, options, saveFunc);
 };

@@ -485,7 +485,8 @@ describe('@API @V1.1API - Entity API', function() {
             _sis : { owner : ["sistest"] },
             definition : {
                 name : "String",
-                num : "Number"
+                num : "Number",
+                nested : { a : "String", b : "String" }
             }
         };
         var entityUrl = "/api/v1.1/entities/" + schema.name;
@@ -593,8 +594,35 @@ describe('@API @V1.1API - Entity API', function() {
                 aggregate.success.length.should.eql(1);
                 aggregate.error.length.should.eql(NUM_QUERIES - 1);
                 aggregate.success[0].should.eql(aggregate.doc.num);
-                doc = aggregate.doc[0];
+                doc = aggregate.doc;
                 done();
+            });
+        });
+
+        it("should keep what the cas update does not change", function(done) {
+            var url = entityUrl + '/' + doc._id;
+            var setup = { nested : { a : "a0", b : "b0" }, _sis : { tags : ["t0"], locked : true } };
+            ApiServer.put(url).send(setup).expect(200, function(err, res) {
+                if (err) { return done(err); }
+                var before = res.body;
+                var update = { nested : { a : "a1" }, _sis : { tags : ["t1"] } };
+                ApiServer.put(url).query({ cas : { num : before.num } }).send(update)
+                .expect(200, function(err, res) {
+                    if (err) { return done(err); }
+                    ApiServer.get(url).expect(200, function(err, res) {
+                        if (err) { return done(err); }
+                        var after = res.body;
+                        after.nested.should.eql({ a : "a1", b : "b0" });
+                        after._sis.tags.should.eql(["t1"]);
+                        after._sis.locked.should.eql(true);
+                        after._sis._created_by.should.eql(before._sis._created_by);
+                        after._sis._created_at.should.eql(before._sis._created_at);
+                        after._sis._updated_by.should.eql(before._sis._updated_by);
+                        after._sis._updated_at.should.be.aboveOrEqual(before._sis._updated_at);
+                        // unlock it so the schema can be deleted
+                        ApiServer.put(url).send({ _sis : { locked : false } }).expect(200, done);
+                    });
+                });
             });
         });
 

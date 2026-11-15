@@ -520,16 +520,30 @@ describe('Manager', function() {
         });
 
         it("rejects a CAS update that fails model validation", async function() {
-            var err = null;
-            try {
-                await mgr.update("a", { num : -3 }, { user : admin, cas : { num : 1 } });
-            } catch (e) {
-                err = e;
-            }
-            should.exist(err);
-            err.name.should.eql("ValidationError");
+            await expectError(mgr.update("a", { num : -3 }, { user : admin, cas : { num : 1 } }), 400);
+            (await Model.findOne({ name : "a" }).lean()).num.should.eql(1);
         });
 
+        it("casts the CAS condition", async function() {
+            var result = await mgr.update("a", { num : 3 }, { user : admin, cas : { num : "1" } });
+            result[1].num.should.eql(3);
+            await expectError(mgr.update("a", { num : 4 }, { user : admin, cas : { num : "abc" } }), 400);
+        });
+
+        it("saves a CAS update like any other update", async function() {
+            await Model.updateOne({ name : "a" }, { "_sis.tags" : ["t0"], "_sis.locked" : true });
+            var result = await mgr.update("a", { num : 3, _sis : { tags : ["t1"] } },
+                                          { user : admin, cas : { num : 1 } });
+            var stored = await Model.findOne({ name : "a" }).lean();
+            stored.num.should.eql(3);
+            var m = meta(stored);
+            m.tags.should.eql(["t1"]);
+            m.owner.should.eql(["g1"]);
+            m.locked.should.eql(true);
+            m._created_by.should.eql("super");
+            m._updated_by.should.eql("admin_user");
+            m._updated_at.should.be.aboveOrEqual(meta(result[0])._updated_at);
+        });
     });
 
     describe('upsert', function() {
