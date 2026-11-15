@@ -586,19 +586,13 @@ describe('SchemaManager', function() {
                 await schemaManager.model.collection.deleteOne({ name : bad.name });
             });
 
-            it("builds the models of the stored schemas", function(done) {
-                schemaManager.bootstrapEntitySchemas(done);
+            it("builds the models of the stored schemas", async function() {
+                await schemaManager.bootstrapEntitySchemas();
             });
 
-            it("fails on a stored schema it cannot build", function(done) {
-                schemaManager.model.collection.insertOne(Object.assign({}, bad)).then(function() {
-                    schemaManager.bootstrapEntitySchemas(function(err) {
-                        should.exist(err);
-                        err[0].should.eql(500);
-                        err[1].error.should.match(/Error building schema/);
-                        done();
-                    });
-                }, done);
+            it("fails on a stored schema it cannot build", async function() {
+                await schemaManager.model.collection.insertOne(Object.assign({}, bad));
+                await expectError(schemaManager.bootstrapEntitySchemas(), 500, /Error building schema/);
             });
         });
     });
