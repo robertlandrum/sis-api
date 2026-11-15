@@ -145,8 +145,10 @@ The `client` object represents a SIS client with an API similar to the one provi
 
 In addition to the global variables exposed, scripts have access to the following libraries:
 
- - [bluebird](https://github.com/petkaantonov/bluebird) - exposed as `BPromise`.
- - [csv](https://github.com/wdavidw/node-csv) - exposed as `csv`.
+ - Native JavaScript promises - exposed as `Promise`.  Scripts used to get [bluebird](https://github.com/petkaantonov/bluebird) as `BPromise`; it is no longer available, so scripts that use `BPromise` or bluebird-only methods such as `.spread` need to move to `Promise`.
+ - [csv-stringify](https://csv.js.org/stringify/) - exposed as `csv.stringify`.
+ - [js-yaml](https://github.com/nodeca/js-yaml) - exposed as `yaml`.
+ - `async(generator)` - runs a generator that yields promises: each `yield` waits for the promise and returns its value, or throws its rejection into the generator.  For example `async(function* () { var host = yield client.entities("host").get("localhost"); res.json(host); }());`
 
 ## Sample
 
@@ -172,8 +174,10 @@ function querySis() {
    var query = { "environment" : "qa" };
    var qaHostsPromise = client.entities("host").listAll({ q : query, limit : 10 });
 
-   // use bluebird to "join" the promises
-   BPromise.all([hostPromise, qaHostsPromise]).spread(function(host, qaHosts) {
+   // "join" the promises
+   Promise.all([hostPromise, qaHostsPromise]).then(function(results) {
+       var host = results[0];
+       var qaHosts = results[1];
        // convert to CSV
        var hosts = [host].concat(qaHosts);
        var csvRows = hosts.map(function(host) {
@@ -186,6 +190,12 @@ function querySis() {
            // send it back
            res.set("Content-Type","text/csv").send(output);
        });
+   }, function(err) {
+       // SIS errors are [status, body] arrays
+       if (Array.isArray(err)) {
+           return res.status(err[0]).json(err[1]);
+       }
+       res.status(500).send(String(err));
    });
 }
 
