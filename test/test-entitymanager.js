@@ -146,6 +146,12 @@ describe('EntityManager', function() {
             doc._sis.owner.should.eql(["em_g1"]);
         });
 
+        it("requires roles to add to open schemas", async function() {
+            var open = await getManager(schemas.open);
+            await expectError(open.authorize(SIS.EVENT_INSERT, { name : "a", _sis : { } }, noRoles),
+                              400, /User must have roles assigned/);
+        });
+
         it("defers to the schema owners for entities without owners", function() {
             mgr.getOwners({ _sis : {} }).should.eql(["em_g1", "em_g2"]);
             mgr.getOwners({ _sis : { owner : ["em_g2"] } }).should.eql(["em_g2"]);
@@ -262,5 +268,10 @@ describe('EntityManager', function() {
             await expectError(lost.add({ name : "x", gone : id(0) }, { user : superUser }), 400, /em_gone/);
         });
 
+        it("accepts populated objects in a reference array", async function() {
+            var added = await mgr.add({ name : "ref_objs", many : [{ _id : id(0), name : "t1" }, { _id : id(1) }] },
+                                      { user : superUser });
+            added.many.map(String).should.eql([id(0), id(1)]);
+        });
     });
 });
