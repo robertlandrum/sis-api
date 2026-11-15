@@ -191,4 +191,71 @@ describe("@API @V1.1API - Scripts API", function() {
             });
         });
     });
+
+    describe("Client", function() {
+        let schema = {
+            name : "test_ep_client_hosts",
+            id_field : "name",
+            _sis : { owner : ["test"] },
+            definition : { name : { type : "String", required : true, unique : true }, env : "String" }
+        };
+        let baseUri = "/api/v1.1/endpoints/clienttest";
+
+        async function addScript(name) {
+            await ApiServer.del("/api/v1.1/scripts/" + name);
+            await ApiServer.post("/api/v1.1/scripts").send({
+                name, script_type, script : loadScript(name), _sis : { owner : ["test"] }
+            }).expect(201);
+        }
+
+        before(async function() {
+            await ApiServer.del("/api/v1.1/schemas/" + schema.name);
+            await ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
+            await ApiServer.post("/api/v1.1/entities/" + schema.name)
+                .send([{ name : "h1", env : "qa" }, { name : "h2", env : "prod" }, { name : "h3", env : "qa" }])
+                .expect(200);
+            await addScript("clienttest");
+            await addScript("asyncrunner");
+        });
+
+        after(async function() {
+            await ApiServer.del("/api/v1.1/scripts/clienttest");
+            await ApiServer.del("/api/v1.1/scripts/asyncrunner");
+            await ApiServer.del("/api/v1.1/schemas/" + schema.name);
+        });
+
+        // scripts answer well within this - a hung worker does not
+        function get(path) {
+            return ApiServer.get(baseUri + path).timeout(4000);
+        }
+
+        it("Should get an entity", async function() {
+            let res = await get("/get?name=h1").expect(200);
+            res.body.name.should.eql("h1");
+            res.body.env.should.eql("qa");
+        });
+
+        it("Should list entities matching a query", async function() {
+            let res = await get("/list?env=qa").expect(200);
+            res.body.map(function(h) { return h.name; }).should.eql(["h1", "h3"]);
+        });
+
+        it("Should pass errors to the script", async function() {
+            let res = await get("/get?name=nope").expect(404);
+            res.body.error.should.match(/does not exist/);
+            res = await get("/missing").expect(404);
+            res.body.error.should.match(/test_ep_no_such_schema does not exist/);
+        });
+
+        it("Should run generators with the async helper", async function() {
+            let res = await ApiServer.get("/api/v1.1/endpoints/asyncrunner").timeout(4000).expect(200);
+            res.body.should.eql({ host : "h1", missing : 404 });
+        });
+
+        it("Should keep working after a client for a missing schema goes unused", async function() {
+            (await get("/unused").expect(200)).text.should.eql("unused");
+            (await get("/").expect(200)).text.should.eql("ok");
+        });
+
+    });
 });
