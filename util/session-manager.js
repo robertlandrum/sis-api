@@ -141,71 +141,65 @@ SessionManager.prototype.canIssue = function() {
     return !!this.signingKey;
 };
 
-// Returns a promise for { name : <jwt>, username, expires : Date }
-SessionManager.prototype.issue = function(user) {
-    var self = this;
+// Resolves with { name : <jwt>, username, expires : Date }
+SessionManager.prototype.issue = async function(user) {
     if (!this.signingKey) {
-        return Promise.reject(SIS.ERR_BAD_REQ("This server cannot issue session tokens."));
+        throw SIS.ERR_BAD_REQ("This server cannot issue session tokens.");
     }
     var username = user[SIS.FIELD_NAME];
-    var sgen = user[SIS.FIELD_SESSION_GEN] || 0;
     var nowMs = Date.now();
     var iat = Math.floor(nowMs / 1000);
     var exp = Math.floor((nowMs + this.ttlMs) / 1000);
-    return loadJose().then(function(jose) {
-        var claims = { };
-        claims.sgen = sgen;
-        return new jose.SignJWT(claims)
-            .setProtectedHeader({ alg : SIS.JWT_ALGORITHM, kid : self.activeKid, typ : "JWT" })
-            .setIssuer(self.issuer)
-            .setAudience(SIS.JWT_AUDIENCE)
-            .setSubject(username)
-            .setIssuedAt(iat)
-            .setExpirationTime(exp)
-            .setJti(crypto.randomBytes(16).toString("hex"))
-            .sign(self.signingKey);
-    }).then(function(jwt) {
-        var result = { };
-        result[SIS.FIELD_NAME] = jwt;
-        result[SIS.FIELD_USERNAME] = username;
-        result[SIS.FIELD_EXPIRES] = new Date(exp * 1000);
-        return result;
-    });
+    var jose = await loadJose();
+    var jwt = await new jose.SignJWT({ sgen : user[SIS.FIELD_SESSION_GEN] || 0 })
+        .setProtectedHeader({ alg : SIS.JWT_ALGORITHM, kid : this.activeKid, typ : "JWT" })
+        .setIssuer(this.issuer)
+        .setAudience(SIS.JWT_AUDIENCE)
+        .setSubject(username)
+        .setIssuedAt(iat)
+        .setExpirationTime(exp)
+        .setJti(crypto.randomBytes(16).toString("hex"))
+        .sign(this.signingKey);
+    var result = { };
+    result[SIS.FIELD_NAME] = jwt;
+    result[SIS.FIELD_USERNAME] = username;
+    result[SIS.FIELD_EXPIRES] = new Date(exp * 1000);
+    return result;
 };
 
-// Returns a promise for the verified claims, or rejects with a
+// Resolves with the verified claims, or rejects with a
 // SIS.ERR_BAD_CREDS error.
-SessionManager.prototype.verify = function(token) {
-    var self = this;
-    return loadJose().then(function(jose) {
-        var getKey = function(header) {
-            var key = header.kid && self.verifyKeys[header.kid];
-            if (!key) {
-                throw new Error("unknown kid");
-            }
-            return key;
-        };
-        return jose.jwtVerify(token, getKey, {
+SessionManager.prototype.verify = async function(token) {
+    var jose = await loadJose();
+    var getKey = (header) => {
+        var key = header.kid && this.verifyKeys[header.kid];
+        if (!key) {
+            throw new Error("unknown kid");
+        }
+        return key;
+    };
+    var result;
+    try {
+        result = await jose.jwtVerify(token, getKey, {
             algorithms : [SIS.JWT_ALGORITHM],
-            issuer : self.issuer,
+            issuer : this.issuer,
             audience : SIS.JWT_AUDIENCE,
             typ : "JWT",
             requiredClaims : ["exp", "iat", "sub"],
             clockTolerance : SIS.JWT_CLOCK_TOLERANCE_SEC
-        }).then(function(result) {
-            var claims = result.payload;
-            if (typeof claims.sub !== "string" || !claims.sub ||
-                !Number.isInteger(claims.sgen)) {
-                return Promise.reject(SIS.ERR_BAD_CREDS("Invalid token."));
-            }
-            return claims;
-        }, function(err) {
-            if (err && err.code === "ERR_JWT_EXPIRED") {
-                return Promise.reject(SIS.ERR_BAD_CREDS("Token has expired."));
-            }
-            return Promise.reject(SIS.ERR_BAD_CREDS("Invalid token."));
         });
-    });
+    } catch (err) {
+        if (err && err.code === "ERR_JWT_EXPIRED") {
+            throw SIS.ERR_BAD_CREDS("Token has expired.");
+        }
+        throw SIS.ERR_BAD_CREDS("Invalid token.");
+    }
+    var claims = result.payload;
+    if (typeof claims.sub !== "string" || !claims.sub ||
+        !Number.isInteger(claims.sgen)) {
+        throw SIS.ERR_BAD_CREDS("Invalid token.");
+    }
+    return claims;
 };
 
 // true if the token has the shape of a JWT (vs. an opaque hex token)
