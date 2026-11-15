@@ -539,6 +539,12 @@ describe('Manager', function() {
             await expectError(mgr.upsert("b", item("c", 2), { user : admin }), 400, /specified ID/);
         });
 
+        it("rejects with the update's error for an existing object", async function() {
+            var user = { name : "u", roles : { g3 : SIS.ROLE_ADMIN } };
+            await expectError(mgr.upsert("a", item("a", 2), { user : user }), 401);
+            await expectError(mgr.upsert("a", item("a", 2), { user : admin, cas : { num : 5 } }),
+                              400, /CAS update failed/);
+        });
     });
 
     describe('delete', function() {
@@ -621,6 +627,16 @@ describe('Manager', function() {
             result.errors[0].value.num.should.eql(2);
             result.internalErr[0].should.eql(409);
             (await Model.countDocuments({})).should.eql(1);
+        });
+
+        it("reports the refused items correctly when others failed validation", async function() {
+            await mgr.add(item("a", 1), { user : admin });
+            var result = await mgr.bulkAdd([item("a", 2), item("b", -1), item("c", 3)], { user : admin });
+            result.success.map(function(s) { return s.name; }).should.eql(["c"]);
+            var errors = result.errors.map(function(e) { return [e.value.name, e.err[1].error]; });
+            errors.length.should.eql(2);
+            errors.should.containDeep([["a", "Bad request: Insert failed"]]);
+            (await Model.countDocuments({ name : "c" })).should.eql(1);
         });
 
         it("removes what was added when all or none is refused", async function() {
@@ -806,7 +822,9 @@ describe('Manager', function() {
                     return finds === 1 ? Model.find.apply(Model, arguments) : rejectingQuery(new Error("db down"))();
                 }
             }, { auth : true });
-            await expectError(broken.bulkDelete({ "_sis.owner" : "g1" }, { user : admin }), 500, /db down/);
+            var err = await expectError(broken.bulkDelete({ "_sis.owner" : "g1" }, { user : admin }), 500);
+            // wrapped once, so the client sees no stack trace
+            err[1].error.should.eql("Internal error Error: db down");
         });
 
         it("rejects with 500 when the delete fails", async function() {

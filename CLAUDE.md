@@ -135,6 +135,10 @@ bootstrap the first superuser, since the REST API requires an existing privilege
 
 ## Conventions
 
+- The code is moving to `async`/`await` ahead of an ESM conversion. Converted
+  modules (so far `util/manager.js`) use `async` methods, `try`/`catch` around awaited
+  calls and arrow callbacks instead of `var self = this`; write new code that way and
+  cover it in the style of `test/test-manager.js` (`async` mocha tests).
 - Promises are **native** (`Promise`). The small `util/promises.js` helper provides the
   idioms the code still leans on: `defer()` (replaces the old `BPromise.pending()`),
   `nodeify(promise, cb)`, `spread(fn)` (use `.then(P.spread(fn))`), and `tap(fn)`
