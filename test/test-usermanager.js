@@ -380,6 +380,12 @@ describe('User Manager', function() {
                 user.super_user.should.eql(false);
                 (await userManager.getById("edge_new", { lean : true })).email.should.eql("edge_new@x.com");
             });
+
+            it("passes on why the user could not be created", async function() {
+                var err = await expectError(userManager.getOrCreateEmptyUser({ name : "edge_new2", email : "e@x.com" }, null),
+                                            401, /User is null/);
+                err[1].error.should.not.match(/ at /);
+            });
         });
 
         describe("authorize", function() {

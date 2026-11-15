@@ -18,16 +18,14 @@ function UserManager(sm) {
 require('util').inherits(UserManager, Manager);
 
 // End all of the user's sessions (logout everywhere)
-UserManager.prototype.endSessions = function(username) {
+UserManager.prototype.endSessions = async function(username) {
     var inc = { };
     inc[SIS.FIELD_SESSION_GEN] = 1;
-    return Promise.resolve(this.model.updateOne({ name : username }, { $inc : inc }).exec())
-    .then(function(result) {
-        if (!result.matchedCount) {
-            return Promise.reject(SIS.ERR_NOT_FOUND(SIS.SCHEMA_USERS, username));
-        }
-        return username;
-    });
+    var result = await this.model.updateOne({ name : username }, { $inc : inc }).exec();
+    if (!result.matchedCount) {
+        throw SIS.ERR_NOT_FOUND(SIS.SCHEMA_USERS, username);
+    }
+    return username;
 };
 
 UserManager.prototype.hashPw = function(pw) {
@@ -62,83 +60,78 @@ UserManager.prototype.applyUpdate = function(obj, updateObj) {
     return Manager.prototype.applyUpdate.call(this, obj, updateObj);
 };
 
-UserManager.prototype.getVerifiedUser = function(username, pw) {
-    var self = this;
-    var p = this.getById(username, { lean : true }).then(function(u) {
-        pw = self.hashPw(pw);
-        if (u[SIS.FIELD_PW] != pw) {
-            return Promise.reject(SIS.ERR_BAD_CREDS("Invalid password."));
-        } else {
-            return Promise.resolve(u);
-        }
-    });
-    return p;
-};
-
-UserManager.prototype.getOrCreateEmptyUser = function(userObj, superUser) {
-    var self = this;
-    if (!userObj || !userObj.name || !userObj.email) {
-        return Promise.reject(SIS.ERR_INTERNAL("Invalid user specified in getOrCreate"));
+// Resolves with the user if the password is right
+UserManager.prototype.getVerifiedUser = async function(username, pw) {
+    var u = await this.getById(username, { lean : true });
+    if (u[SIS.FIELD_PW] != this.hashPw(pw)) {
+        throw SIS.ERR_BAD_CREDS("Invalid password.");
     }
-    var username = userObj.name;
-    return Promise.resolve(this.model.findOne({name : username}).exec()).then(function(user) {
-        if (!user) {
-            // create it
-            user = {
-                name : username,
-                email : userObj.email,
-                roles : { },
-                super_user : false
-            };
-            return self.add(user, { user : superUser});
-        } else {
-            // found
-            return Promise.resolve(user);
-        }
-    }).catch(function(e) {
-        return Promise.reject(SIS.ERR_INTERNAL(e));
-    });
+    return u;
 };
 
-UserManager.prototype.authorize = function(evt, doc, user, mergedDoc) {
+// Resolves with the user named userObj.name, adding it without roles if it
+// does not exist yet (users authenticated by LDAP)
+UserManager.prototype.getOrCreateEmptyUser = async function(userObj, superUser) {
+    if (!userObj || !userObj.name || !userObj.email) {
+        throw SIS.ERR_INTERNAL("Invalid user specified in getOrCreate");
+    }
+    var user;
+    try {
+        user = await this.model.findOne({ name : userObj.name }).exec();
+    } catch (e) {
+        throw SIS.ERR_INTERNAL(e);
+    }
+    if (user) {
+        return user;
+    }
+    // add errors are already SIS errors
+    return this.add({
+        name : userObj.name,
+        email : userObj.email,
+        roles : { },
+        super_user : false
+    }, { user : superUser });
+};
+
+UserManager.prototype.authorize = async function(evt, doc, user, mergedDoc) {
     if (!this.authEnabled) {
-        return Promise.resolve(mergedDoc || doc);
+        return mergedDoc || doc;
     }
     if (!user) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("User is null."));
+        throw SIS.ERR_BAD_CREDS("User is null.");
     }
     // super users do it all
     if (user[SIS.FIELD_SUPERUSER]) {
-        return Promise.resolve(mergedDoc || doc);
+        return mergedDoc || doc;
     }
     if (!user[SIS.FIELD_ROLES]) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("User has no roles."));
+        throw SIS.ERR_BAD_CREDS("User has no roles.");
     }
     // doc is a user object
     switch (evt) {
         case SIS.EVENT_INSERT:
         case SIS.EVENT_DELETE:
             if (doc[SIS.FIELD_SUPERUSER] && !user[SIS.FIELD_SUPERUSER]) {
-                return Promise.reject(SIS.ERR_BAD_CREDS("Only superusers can " + evt + " superusers."));
+                throw SIS.ERR_BAD_CREDS("Only superusers can " + evt + " superusers.");
             }
             if (!SIS.UTIL_ENSURE_ROLE_SUBSET(user[SIS.FIELD_ROLES], doc[SIS.FIELD_ROLES], true)) {
-                return Promise.reject(SIS.ERR_BAD_CREDS("Cannot " + evt + " user unless admin of all roles."));
+                throw SIS.ERR_BAD_CREDS("Cannot " + evt + " user unless admin of all roles.");
             }
             if (doc[SIS.FIELD_NAME] == user[SIS.FIELD_NAME]) {
-                return Promise.reject(SIS.ERR_BAD_CREDS("Cannot " + evt + " a user with the same name."));
+                throw SIS.ERR_BAD_CREDS("Cannot " + evt + " a user with the same name.");
             }
-            return Promise.resolve(doc);
+            return doc;
         default: // update
             // if changing roles, then an admin of the roles being added/removed
             // are allowed..
             if (doc[SIS.FIELD_SUPERUSER] && !user[SIS.FIELD_SUPERUSER] ||
                 mergedDoc[SIS.FIELD_SUPERUSER] && !user[SIS.FIELD_SUPERUSER]) {
-                return Promise.reject(SIS.ERR_BAD_CREDS("Only superusers can update superusers."));
+                throw SIS.ERR_BAD_CREDS("Only superusers can update superusers.");
             }
             if (!SIS.UTIL_ROLES_EQUAL(doc, mergedDoc)) {
                 // changing roles
                 if (doc[SIS.FIELD_NAME] == user[SIS.FIELD_NAME]) {
-                    return Promise.reject(SIS.ERR_BAD_CREDS("User's cannot change their own roles."));
+                    throw SIS.ERR_BAD_CREDS("User's cannot change their own roles.");
                 }
                 // need to get the diffs..
                 var k;
@@ -148,7 +141,7 @@ UserManager.prototype.authorize = function(evt, doc, user, mergedDoc) {
                 for (k in roleDiff) {
                     // need to make sure the user is an admin of the role being added/deleted/updated
                     if (!(k in userRoles) || userRoles[k] != SIS.ROLE_ADMIN) {
-                        return Promise.reject(SIS.ERR_BAD_CREDS(user[SIS.FIELD_NAME] + " is not an admin of role " + k));
+                        throw SIS.ERR_BAD_CREDS(user[SIS.FIELD_NAME] + " is not an admin of role " + k);
                     }
                 }
                 // non role fields can't be changed here.
@@ -156,30 +149,30 @@ UserManager.prototype.authorize = function(evt, doc, user, mergedDoc) {
                 delete docDiff[SIS.FIELD_ROLES];
                 for (k in docDiff) {
                     // can't change this field.
-                    return Promise.reject(SIS.ERR_BAD_CREDS("Only the user or a super user can change non role fields. (" + k + ")"));
+                    throw SIS.ERR_BAD_CREDS("Only the user or a super user can change non role fields. (" + k + ")");
                 }
             } else {
                 // not changing roles.. only fields
                 if (doc[SIS.FIELD_NAME] != user[SIS.FIELD_NAME]) {
-                    return Promise.reject(SIS.ERR_BAD_CREDS("Only the user or a super user can change non role fields."));
+                    throw SIS.ERR_BAD_CREDS("Only the user or a super user can change non role fields.");
                 }
                 if (SIS.FIELD_VERIFIED in doc && doc[SIS.FIELD_VERIFIED] != mergedDoc[SIS.FIELD_VERIFIED]) {
-                    return Promise.reject(SIS.ERR_BAD_REQ("Cannot change verified state of self."));
+                    throw SIS.ERR_BAD_REQ("Cannot change verified state of self.");
                 }
             }
-            return Promise.resolve(mergedDoc);
+            return mergedDoc;
     } // end switch
 };
 
-UserManager.prototype.objectRemoved = function(user) {
-    // remove all tokens where username = user[name];
+// remove the user's tokens
+UserManager.prototype.objectRemoved = async function(user) {
     var tokenManager = this.sm.getTokenManagerForUser(user[SIS.FIELD_NAME]);
-    return Promise.resolve(tokenManager.model.deleteMany({username : user[SIS.FIELD_NAME]}).exec())
-    .then(function() {
-        return user;
-    }).catch(function(err) {
-        return Promise.reject(SIS.ERR_INTERNAL("Unable to clear tokens for user."));
-    });
+    try {
+        await tokenManager.model.deleteMany({ username : user[SIS.FIELD_NAME] }).exec();
+    } catch (err) {
+        throw SIS.ERR_INTERNAL("Unable to clear tokens for user.");
+    }
+    return user;
 };
 
 UserManager.prototype.validate = function(obj, toUpdate) {
