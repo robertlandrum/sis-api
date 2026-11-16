@@ -5,12 +5,12 @@ describe('Initialize Tests', function() {
 
     var test = null;
 
-    it("Should create the test", function(done) {
+    it("Should create the test", async function() {
         test = new util.LocalTest();
-        test.start(done);
+        await test.start();
     });
 
-    it("Should stop the test", function(done) {
-        test.stop(done);
+    it("Should stop the test", async function() {
+        await test.stop();
     });
 });

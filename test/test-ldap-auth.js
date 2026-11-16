@@ -11,11 +11,9 @@ describe('LDAP authentication', function() {
     var schemaManager = null;
     var ldap = null;
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
-            done(err);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
     });
 
     before(async function() {
@@ -29,8 +27,8 @@ describe('LDAP authentication', function() {
         await ldap.close();
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
 
     // the verify function of the Basic strategy, as passport calls it

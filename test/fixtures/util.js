@@ -3,6 +3,7 @@
 var nconf = require('nconf');
 var fs = require('fs');
 var path = require('path');
+var P = require('../../util/promises');
 
 function loadConfig() {
     nconf.env('__').argv();
@@ -24,70 +25,64 @@ function TestServer() {
         return serverData;
     };
 
+    // Start the local server (once) or connect to SIS_REMOTE_URL.  Resolves
+    // with the server data - and calls callback(err, data) if one is given.
     this.start = function(callback) {
-        if (!process.env.SIS_REMOTE_URL) {
-            var SIS = require("../../util/constants");
-            // start a local server
-            if (!serverData) {
-                loadConfig();
-                var server = require('../../server');
-                return server.startServer(function(app, http) {
-                    var sd = {
-                        server : server,
-                        mongoose : server.mongoose,
-                        http : http,
-                        app : app,
-                        request : require('supertest')('http://127.0.0.1:' + nconf.get("server:port")),
-                        local : true
-                    };
+        return P.nodeify(start.call(this), callback);
+    };
 
-                    var schemaManager = app.get('schema_manager');
-                    var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
-                    // add a sistest_super user
-                    var localSuper = {
-                        name : 'sistest_local',
-                        super_user : true
-                    };
-                    var sisSuper = {
-                        name : 'sistest_super',
-                        pw : 'sistest',
-                        super_user : true,
-                        email : 'sistest@sis.test'
-                    };
-                    userManager.getById(sisSuper.name).then(function(user) {
-                        serverData = sd;
-                        serverData.schemaManager = schemaManager;
-                        serverData.superUser = localSuper;
-                        serverData.username = 'sistest_super';
-                        serverData.password = 'sistest';
-                        callback(null, serverData);
-                    }, function(dne) {
-                        userManager.add(sisSuper, { user : localSuper }).nodeify(function(e, user) {
-                            if (e) {
-                                return callback(e);
-                            }
-                            serverData = sd;
-                            serverData.schemaManager = schemaManager;
-                            serverData.superUser = localSuper;
-                            serverData.username = 'sistest_super';
-                            serverData.password = 'sistest';
-                            return callback(null, serverData);
-                        });
-                    });
-                });
-            } else {
-                return callback(null, serverData);
-            }
-        } else {
+    var start = async function() {
+        if (process.env.SIS_REMOTE_URL) {
             if (!process.env.SIS_REMOTE_USERNAME ||
                 !process.env.SIS_REMOTE_PASSWORD) {
-                return callback("super credentials not set.", null);
+                throw "super credentials not set.";
             }
-            this.setupRemote(process.env.SIS_REMOTE_URL,
-                             process.env.SIS_REMOTE_USERNAME,
-                             process.env.SIS_REMOTE_PASSWORD);
-            return callback(null, serverData);
+            return this.setupRemote(process.env.SIS_REMOTE_URL,
+                                    process.env.SIS_REMOTE_USERNAME,
+                                    process.env.SIS_REMOTE_PASSWORD);
         }
+        if (serverData) {
+            return serverData;
+        }
+        var SIS = require("../../util/constants");
+        loadConfig();
+        var server = require('../../server');
+        var started = await new Promise(function(resolve) {
+            server.startServer(function(app, http) {
+                resolve({ app : app, http : http });
+            });
+        });
+        var schemaManager = started.app.get('schema_manager');
+        var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
+        // add a sistest_super user
+        var localSuper = {
+            name : 'sistest_local',
+            super_user : true
+        };
+        var sisSuper = {
+            name : 'sistest_super',
+            pw : 'sistest',
+            super_user : true,
+            email : 'sistest@sis.test'
+        };
+        try {
+            await userManager.getById(sisSuper.name);
+        } catch (dne) {
+            await userManager.add(sisSuper, { user : localSuper });
+        }
+        serverData = {
+            server : server,
+            mongoose : server.mongoose,
+            http : started.http,
+            app : started.app,
+            request : require('supertest')('http://127.0.0.1:' + nconf.get("server:port")),
+            local : true,
+            schemaManager : schemaManager,
+            superUser : localSuper,
+            username : 'sistest_super',
+            password : 'sistest'
+        };
+        return serverData;
     };
 
     this.getSuperCreds = function() {
@@ -102,18 +97,18 @@ function TestServer() {
 
     this.authToken = null;
 
+    // Use a session of the super user for the requests from now on
     this.becomeSuperUser = function(callback) {
+        return P.nodeify(becomeSuperUser.call(this), callback);
+    };
+
+    var becomeSuperUser = async function() {
         var creds = this.getSuperCreds();
         if (!creds) {
-            callback("not initialized.");
-            return;
+            throw "not initialized.";
         }
-        var self = this;
-        this.getTempToken(creds.username, creds.password, function(e, t) {
-            if (e) { return callback(e); }
-            self.authToken = t.name;
-            return callback(null);
-        });
+        var t = await this.getTempToken(creds.username, creds.password);
+        this.authToken = t.name;
     };
 
     this.newRequest = function(method, url, token) {
@@ -149,23 +144,29 @@ function TestServer() {
         return result;
     };
 
+    // Stop the local server and close its database connection
     this.stop = function(callback) {
+        return P.nodeify(stop(), callback);
+    };
+
+    var stop = async function() {
         if (!serverData) {
-            return callback("NOTHING TO STOP");
+            throw "NOTHING TO STOP";
         }
         if (!serverData.local) {
-            return callback();
+            return;
         }
-        serverData.server.stopServer(serverData.http, function() {
-            // mongoose 8 connection.close() returns a promise (no callback)
-            Promise.resolve(serverData.mongoose.connection.close()).then(function() {
-                serverData = null;
-                callback();
-            }, function(err) {
-                serverData = null;
-                callback(err);
+        var data = serverData;
+        serverData = null;
+        await new Promise(function(resolve, reject) {
+            data.server.stopServer(data.http, function(err) {
+                // stopping is done once the connection is closed - an error
+                // closing the http server is not the test's problem
+                resolve();
             });
         });
+        // mongoose 8 connection.close() returns a promise (no callback)
+        await data.mongoose.connection.close();
     };
 
     ['get', 'post', 'put', 'del'].forEach(function(method) {
@@ -178,18 +179,21 @@ function TestServer() {
         };
     }.bind(this));
 
+    // Resolves with a session token of the user
     this.getTempToken = function(username, password, callback) {
+        return P.nodeify(getTempToken.call(this, username, password), callback);
+    };
+
+    var getTempToken = async function(username, password) {
         if (!serverData) {
-            return callback("server not started.");
+            throw "server not started.";
         }
         var req = this.post("/api/v1.1/users/auth_token")
                                     .auth(username, password)
                                     .send("auth");
         req.set('Content-Type', null);
-        req.expect(201, function(err, res) {
-            if (err) { return callback(err); }
-            return callback(null, res.body);
-        });
+        var res = await req.expect(201);
+        return res.body;
     };
 }
 
@@ -198,35 +202,39 @@ module.exports.TestServer = TestServer;
 function LocalTest() {
     var dbData = null;
 
+    // Connect to the test database.  Resolves with mongoose - and calls
+    // callback(err, mongoose) if one is given.
     this.start = function(callback) {
+        return P.nodeify(start(), callback);
+    };
+
+    var start = async function() {
         if (dbData) {
-            callback(null, dbData.mongoose);
-            return;
+            return dbData.mongoose;
         }
         loadConfig();
         var mongoose = require('mongoose');
-        mongoose.connect(nconf.get('db').url);
-        mongoose.connection.once('open', function() {
-            dbData = {
-                mongoose : mongoose
-            };
-            callback(null, mongoose);
-        });
+        await mongoose.connect(nconf.get('db').url);
+        dbData = {
+            mongoose : mongoose
+        };
+        return mongoose;
     };
 
+    // Drop the test database and close the connection
     this.stop = function(callback) {
+        return P.nodeify(stop(), callback);
+    };
+
+    var stop = async function() {
         if (!dbData) {
-            return callback();
+            return;
         }
         var mongoose = dbData.mongoose;
+        dbData = null;
         // mongoose 8 / modern driver use promises (no callbacks)
-        Promise.resolve(mongoose.connection.dropDatabase()).then(function() {
-            return mongoose.connection.close();
-        }).then(function() {
-            callback();
-        }, function(err) {
-            callback(err);
-        });
+        await mongoose.connection.dropDatabase();
+        await mongoose.connection.close();
     };
 
     this.superUser = { name : 'sistest', super_user : true };

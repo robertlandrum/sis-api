@@ -2,7 +2,6 @@ describe('@API @V1.1API - Schema API', function() {
     "use strict";
 
     var should = require('should');
-    var async = require('async');
 
     var SIS = require("../../util/constants");
 
@@ -10,52 +9,44 @@ describe('@API @V1.1API - Schema API', function() {
 
     var ApiServer = new TestUtil.TestServer();
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) {
-                done(e);
-                return;
-            }
-            ApiServer.becomeSuperUser(done);
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
-    function errHandler(done) {
-        return function(err, res) {
-            should.not.exist(err);
-            err = res.body;
-            err.should.be.instanceof(Object);
-            err.should.not.be.instanceof(Array);
-            should.exist(err.code);
-            should.exist(err.error);
-            done();
-        };
+    // the body of an error response is a SIS error object
+    function expectErrorBody(res) {
+        var err = res.body;
+        err.should.be.instanceof(Object);
+        err.should.not.be.instanceof(Array);
+        should.exist(err.code);
+        should.exist(err.error);
     }
 
     describe("Schema failure cases", function() {
-        it("Should fail if type does not exist ", function(done) {
-            ApiServer.get("/api/v1.1/schemas/dne").expect(404, errHandler(done));
+        it("Should fail if type does not exist ", async function() {
+            expectErrorBody(await ApiServer.get("/api/v1.1/schemas/dne").expect(404));
         });
-        it("Should fail to delete type if it doesn't exist", function(done) {
-            ApiServer.del("/api/v1.1/schemas/dne").expect(404, errHandler(done));
+        it("Should fail to delete type if it doesn't exist", async function() {
+            expectErrorBody(await ApiServer.del("/api/v1.1/schemas/dne").expect(404));
         });
-        it("Should fail to add an invalid schema", function(done) {
-            ApiServer.post("/api/v1.1/schemas")
+        it("Should fail to add an invalid schema", async function() {
+            expectErrorBody(await ApiServer.post("/api/v1.1/schemas")
                 .set("Content-type", "application/json")
                 .send({"name" : "no_owner_or_def"})
-                .expect(400, errHandler(done));
+                .expect(400));
         });
-        it("Should fail to update a schema that DNE", function(done) {
-            ApiServer.put("/api/v1.1/schemas/DNE")
+        it("Should fail to update a schema that DNE", async function() {
+            expectErrorBody(await ApiServer.put("/api/v1.1/schemas/DNE")
                 .set("Content-type", "application/json")
                 .send({"name" : "DNE", _sis : { "owner" : "DNE" }, "definition" : {"k" : "String"}})
-                .expect(404, errHandler(done));
+                .expect(404));
         });
-        it("Should fail to add a schema with a bad name", function(done) {
+        it("Should fail to add a schema with a bad name", async function() {
             var schema = {
                 "name" : "@#(*^! !(@#*$!",
                 _sis : { "owner" : "test" },
@@ -63,12 +54,12 @@ describe('@API @V1.1API - Schema API', function() {
                     "name" : "String"
                 }
             };
-            ApiServer.post("/api/v1.1/schemas")
+            expectErrorBody(await ApiServer.post("/api/v1.1/schemas")
                 .set("Content-type", "application/json")
                 .send(schema)
-                .expect(400, errHandler(done));
+                .expect(400));
         });
-        it("Should fail to add a schema with a non existent ID field", function(done) {
+        it("Should fail to add a schema with a non existent ID field", async function() {
             var schema = {
                 name : "test_bad_id_1",
                 id_field : "bogus",
@@ -77,12 +68,12 @@ describe('@API @V1.1API - Schema API', function() {
                     name : "String"
                 }
             };
-            ApiServer.post("/api/v1.1/schemas")
+            expectErrorBody(await ApiServer.post("/api/v1.1/schemas")
                 .set("Content-type", "application/json")
                 .send(schema)
-                .expect(400, errHandler(done));
+                .expect(400));
         });
-        it("Should fail to add a schema with a non unique / required id field", function(done) {
+        it("Should fail to add a schema with a non unique / required id field", async function() {
             var schema = {
                 name : "test_bad_id_2",
                 id_field : "name",
@@ -91,21 +82,33 @@ describe('@API @V1.1API - Schema API', function() {
                     name : "String"
                 }
             };
-            ApiServer.post("/api/v1.1/schemas")
+            expectErrorBody(await ApiServer.post("/api/v1.1/schemas")
                 .set("Content-type", "application/json")
                 .send(schema)
-                .expect(400, errHandler(done));
+                .expect(400));
         });
-        it("Should fail to add a schema with invalid JSON", function(done) {
-            ApiServer.post("/api/v1.1/schemas")
+        it("Should fail to add a schema whose definition is not an object", async function() {
+            for (var definition of ["name", 5, ["name", "String"], null]) {
+                var res = await ApiServer.post("/api/v1.1/schemas")
+                    .send({ name : "test_bad_definition", _sis : { owner : ["sistest"] }, definition : definition })
+                    .expect(400);
+                res.body.error.should.eql("Bad request: Schema definition must be an object.");
+            }
+            res = await ApiServer.post("/api/v1.1/schemas")
+                .send({ name : "test_bad_definition", _sis : { owner : ["sistest"] } })
+                .expect(400);
+            res.body.error.should.eql("Bad request: Schema definition must be an object.");
+        });
+        it("Should fail to add a schema with invalid JSON", async function() {
+            expectErrorBody(await ApiServer.post("/api/v1.1/schemas")
                 .set("Content-type", "application/json")
                 .send("{ Invalid JSON }")
-                .expect(400, errHandler(done));
+                .expect(400));
         });
     });
     describe("Allowed schemas in v1.1", function() {
         // no longer an issue in v1.1
-        it("Should not fail to add a schema with a sis_ field", function(done) {
+        it("Should not fail to add a schema with a sis_ field", async function() {
             var schema = {
                 name : "test_schema_field_sis",
                 _sis : { owner : ["sistest"] },
@@ -113,16 +116,14 @@ describe('@API @V1.1API - Schema API', function() {
                     sis_name : "String"
                 }
             };
-            ApiServer.del("/api/v1.1/schemas/" + schema.name)
-            .endAsync().then(function() {
-                return ApiServer.post("/api/v1.1/schemas")
-                    .send(schema)
-                    .expectAsync(201).nodeify(done);
-            });
+            await ApiServer.del("/api/v1.1/schemas/" + schema.name);
+            await ApiServer.post("/api/v1.1/schemas")
+                .send(schema)
+                .expect(201);
         });
         var types = ["Number", "String", "ObjectId", { }, "Boolean"];
         types.forEach(function(type, idx) {
-            it("Should add a schema with owner = " + JSON.stringify(type), function(done) {
+            it("Should add a schema with owner = " + JSON.stringify(type), async function() {
                 var schema = {
                     name : "test_schema_owner_field_" + idx,
                     _sis : { owner : ["sistest"] },
@@ -130,13 +131,11 @@ describe('@API @V1.1API - Schema API', function() {
                         owner : type
                     }
                 };
-                ApiServer.del("/api/v1.1/schemas/" + schema.name)
-                .endAsync().then(function() {
-                    ApiServer.post("/api/v1.1/schemas")
-                        .set("Content-type", "application/json")
-                        .send(schema)
-                        .expectAsync(201).nodeify(done);
-                });
+                await ApiServer.del("/api/v1.1/schemas/" + schema.name);
+                await ApiServer.post("/api/v1.1/schemas")
+                    .set("Content-type", "application/json")
+                    .send(schema)
+                    .expect(201);
             });
         });
         var badQueries = [
@@ -147,10 +146,10 @@ describe('@API @V1.1API - Schema API', function() {
         ];
 
         badQueries.forEach(function(bq) {
-            it("Should return a 400 with query " + bq, function(done) {
-                ApiServer.get("/api/v1.1/schemas")
+            it("Should return a 400 with query " + bq, async function() {
+                await ApiServer.get("/api/v1.1/schemas")
                     .query({ q: bq })
-                    .expectAsync(400).nodeify(done);
+                    .expect(400);
             });
         });
     });
@@ -169,103 +168,80 @@ describe('@API @V1.1API - Schema API', function() {
                 "owner" : ["String"]
             }
         };
-        before(function(done) {
-            ApiServer.del('/api/v1.1/schemas/test_network_element')
-                .end(done);
+        before(async function() {
+            await ApiServer.del('/api/v1.1/schemas/test_network_element');
         });
 
-        it("Should create new schemas", function(done) {
+        // the fields of the schema sent, as the response has them
+        function expectSchemaFields(data) {
+            should.exist(data);
+            for (var k in jsData) {
+                if (k === '_sis') { continue; }
+                jsData[k].should.eql(data[k]);
+            }
+        }
 
-            ApiServer.post("/api/v1.1/schemas")
+        it("Should create new schemas", async function() {
+            await ApiServer.post("/api/v1.1/schemas")
                 .set('Content-Type', 'application/json')
                 .send(jsData)
-                .expect(201, function(e, r) {
-                    if (e) {
-                        console.log(r.body);
-                    }
-                    done(e);
-                });
+                .expect(201);
         });
-        it("Should get the schema", function(done) {
-            ApiServer.get("/api/v1.1/schemas/test_network_element")
-                .expect(200)
-                .end(function(err, res) {
-                    var data = res.body;
-                    should.not.exist(err);
-                    should.exist(data);
-                    for (var k in jsData) {
-                        if (k === '_sis') { continue; }
-                        jsData[k].should.eql(data[k]);
-                    }
-                    done();
-                });
+        it("Should get the schema", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas/test_network_element")
+                .expect(200);
+            expectSchemaFields(res.body);
         });
-        it("Should update the schema", function(done) {
+        it("Should update the schema", async function() {
             // update jsdata
             jsData.definition.cid = "Number";
-            ApiServer.put("/api/v1.1/schemas/test_network_element")
+            var res = await ApiServer.put("/api/v1.1/schemas/test_network_element")
                 .set("Content-type", "application/json")
                 .send(jsData)
-                .expect(200)
-                .end(function(err, res) {
-                    var data = res.body;
-                    should.not.exist(err);
-                    should.exist(data);
-                    for (var k in jsData) {
-                        if (k === '_sis') { continue; }
-                        jsData[k].should.eql(data[k]);
-                    }
-                    done();
-                });
+                .expect(200);
+            expectSchemaFields(res.body);
         });
-        it("Should fail to change the schema name", function(done) {
-            jsData.name = "whatever";
-            ApiServer.put("/api/v1.1/schemas/test_network_element")
+        it("Should fail to change the schema name", async function() {
+            var renamed = Object.assign({ }, jsData, { name : "whatever" });
+            await ApiServer.put("/api/v1.1/schemas/test_network_element")
                 .set("Content-type", "application/json")
-                .send(jsData)
-                .expect(400, done);
+                .send(renamed)
+                .expect(400);
         });
-        it("Should fail to update the schema with an invalid body", function(done) {
-            delete jsData.owner;
-            jsData.name = 'network_element';
-            ApiServer.put("/api/v1.1/schemas/test_network_element")
+        it("Should fail to update the schema with an invalid body", async function() {
+            var invalid = Object.assign({ }, jsData, { definition : { cid : "NoSuchType" } });
+            var res = await ApiServer.put("/api/v1.1/schemas/test_network_element")
                 .set("Content-type", "application/json")
-                .send(jsData)
-                .expect(400, done);
+                .send(invalid)
+                .expect(400);
+            res.body.error.should.match(/NoSuchType/);
         });
-        it("Should delete the schema", function(done) {
-            ApiServer.del("/api/v1.1/schemas/test_network_element")
-                .expect(200, done);
+        it("Should delete the schema", async function() {
+            await ApiServer.del("/api/v1.1/schemas/test_network_element")
+                .expect(200);
         });
     });
 
     describe("Schema search", function() {
-        before(function(done) {
+        before(async function() {
             // insert three schemas
             var schemas = [{ "name":"s1", "definition": { "field" : "String" }, _sis : { "owner" : "sistest_rops" } },
                            { "name":"s2", "definition": { "field" : "String" }, _sis : { "owner" : "sistest_rops" } },
                            { "name":"t1", "definition": { "field" : "String" }, _sis : { "owner" : "sistest_pops" } }];
-            // async magic - https://github.com/caolan/async
-            async.map(schemas, function(schema, callback) {
-                ApiServer.post('/api/v1.1/schemas')
-                    .send(schema).expect(201, callback);
-            }, done);
+            await Promise.all(schemas.map(function(schema) {
+                return ApiServer.post('/api/v1.1/schemas').send(schema).expect(201);
+            }));
         });
-        after(function(done) {
-            async.map(['s1', 's2', 't1'], function(schema, callback) {
-                ApiServer.del('/api/v1.1/schemas/' + schema)
-                    .expect(200, callback);
-            }, done);
+        after(async function() {
+            await Promise.all(['s1', 's2', 't1'].map(function(schema) {
+                return ApiServer.del('/api/v1.1/schemas/' + schema).expect(200);
+            }));
         });
-        it("Should return 2 results", function(done) {
-            ApiServer.get("/api/v1.1/schemas")
+        it("Should return 2 results", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas")
                 .query({ offset : 1, limit : 2})
-                .expect(200)
-                .end(function(err, res) {
-                    should.exist(res.body);
-                    res.body.length.should.eql(2);
-                    done();
-                });
+                .expect(200);
+            res.body.length.should.eql(2);
         });
         it("sends the count of all the matches with a page of them", async function() {
             var q = { q : JSON.stringify({ "_sis.owner" : ["sistest_rops"] }) };
@@ -291,23 +267,19 @@ describe('@API @V1.1API - Schema API', function() {
             res.body.should.eql([]);
             res.headers["x-total-count"].should.eql("0");
         });
-        it("Should return s1 and s2 ", function(done) {
-            ApiServer.get("/api/v1.1/schemas")
+        it("Should return s1 and s2 ", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas")
                 .query({q : JSON.stringify({ "_sis.owner" : ["sistest_rops"] }) })
-                .expect(200)
-                .end(function(err, res) {
-                    should.exist(res.body);
-                    res.body.length.should.eql(2);
-                    for (var i = 0; i < 2; ++i) {
-                        res.body[i]._sis.owner.should.eql(['sistest_rops']);
-                    }
-                    done();
-                });
+                .expect(200);
+            res.body.length.should.eql(2);
+            for (var i = 0; i < 2; ++i) {
+                res.body[i]._sis.owner.should.eql(['sistest_rops']);
+            }
         });
     });
 
     describe("Schema regex", function() {
-        it("Should fail for bad regex", function(done) {
+        it("Should fail for bad regex", async function() {
             var failures = [
                 "/foo",
                 "foo",
@@ -315,47 +287,38 @@ describe('@API @V1.1API - Schema API', function() {
                 "//",
                 "//g",
             ];
-            failures = failures.map(function(f, idx) {
-                return {
+            await Promise.all(failures.map(function(f, idx) {
+                var schema = {
                     name : "regex_fail_" + idx,
                     _sis : { owner : ['sistest'] },
                     definition : {
                         name : { type : "String", match : f }
                     }
                 };
-            });
-            async.map(failures, function(schema, callback) {
-                ApiServer.post("/api/v1.1/schemas")
-                    .send(schema).expect(400, callback);
-            }, done);
+                return ApiServer.post("/api/v1.1/schemas").send(schema).expect(400);
+            }));
         });
 
-        it("Should add valid regex", function(done) {
+        it("Should add valid regex", async function() {
             var success = [
                 "/foo/",
                 "/^[0-9]+$/i",
                 "/\\//"
             ];
-            success = success.map(function(s, idx) {
-                return {
+            await Promise.all(success.map(async function(s, idx) {
+                var schema = {
                     name : "regex_success_" + idx,
                     _sis : { owner : ["sistest"] },
                     definition : {
                         name : { type : "String", match : s }
                     }
                 };
-            });
-            async.map(success, function(schema, callback) {
-                ApiServer.post("/api/v1.1/schemas")
-                    .send(schema).expect(201, function(err, res) {
-                        should.not.exist(err);
-                        ApiServer.del("/api/v1.1/schemas/" + schema.name)
-                            .expect(200, callback);
-                    });
-            }, done);
+                await ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
+                await ApiServer.del("/api/v1.1/schemas/" + schema.name).expect(200);
+            }));
         });
 
-        it("Should add a digits only field", function(done) {
+        it("Should add a digits only field", async function() {
             var schema = {
                 name : "regex_digits",
                 _sis : { owner : ["sistest"] },
@@ -372,24 +335,12 @@ describe('@API @V1.1API - Schema API', function() {
                 ["", 201],
                 ["0", 201]
             ];
-            ApiServer.post("/api/v1.1/schemas")
-            .send(schema).expect(201, function(err, res) {
-                async.map(entities, function(e, cb) {
-                    var entity = { digits : e[0] };
-                    var code = e[1];
-                    ApiServer.post("/api/v1.1/entities/regex_digits")
-                    .send(entity).expect(code, function(err, res) {
-                        if (err) {
-                            console.log(JSON.stringify(e));
-                        }
-                        cb(err, res);
-                    });
-                }, function(err, res) {
-                    should.not.exist(err);
-                    ApiServer.del("/api/v1.1/schemas/regex_digits")
-                        .expect(200, done);
-                });
-            });
+            await ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
+            await Promise.all(entities.map(function(e) {
+                return ApiServer.post("/api/v1.1/entities/regex_digits")
+                    .send({ digits : e[0] }).expect(e[1]);
+            }));
+            await ApiServer.del("/api/v1.1/schemas/regex_digits").expect(200);
         });
     });
 
@@ -411,78 +362,55 @@ describe('@API @V1.1API - Schema API', function() {
       var schemaDoc = null;
 
       // create the schema and add an entity
-      before(function(done) {
-          ApiServer.del('/api/v1.1/schemas/' + schema.name)
-              .end(function() {
-              ApiServer.post('/api/v1.1/schemas').send(schema)
-              .expect(201, function(err, result) {
-                  if (err) return done(err);
-                  schemaDoc = result.body;
-                  schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(false);
-                  done();
-              });
-          });
+      before(async function() {
+          await ApiServer.del('/api/v1.1/schemas/' + schema.name);
+          schemaDoc = (await ApiServer.post('/api/v1.1/schemas').send(schema).expect(201)).body;
+          schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(false);
       });
-      after(function(done) {
-          ApiServer.del('/api/v1.1/schemas/' + schema.name).expect(200, done);
+      after(async function() {
+          await ApiServer.del('/api/v1.1/schemas/' + schema.name).expect(200);
       });
 
-      it("Should lock the schema", function(done) {
+      it("Should lock the schema", async function() {
           schemaDoc._sis[SIS.FIELD_LOCKED] = true;
-          ApiServer.put("/api/v1.1/schemas/" + schema.name)
-          .send(schemaDoc).expect(200, function(err, result) {
-              should.not.exist(err);
-              schemaDoc = result.body;
-              schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(true);
-              done();
-          });
+          schemaDoc = (await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+              .send(schemaDoc).expect(200)).body;
+          schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(true);
       });
 
-      it("Should not delete the schema", function(done) {
-          ApiServer.del('/api/v1.1/schemas/' + schema.name)
-          .expect(401, done);
+      it("Should not delete the schema", async function() {
+          await ApiServer.del('/api/v1.1/schemas/' + schema.name)
+              .expect(401);
       });
 
-      it("Should unlock the schema", function(done) {
+      it("Should unlock the schema", async function() {
           schemaDoc._sis[SIS.FIELD_LOCKED] = false;
-          ApiServer.put("/api/v1.1/schemas/" + schema.name)
-          .send(schemaDoc).expect(200, function(err, result) {
-              should.not.exist(err);
-              schemaDoc = result.body;
-              schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(false);
-              done();
-          });
+          schemaDoc = (await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+              .send(schemaDoc).expect(200)).body;
+          schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(false);
       });
 
-      it("Should prevent updating the schema with locked_fields", function(done) {
+      it("Should prevent updating the schema with locked_fields", async function() {
           var obj = JSON.parse(JSON.stringify(schemaDoc));
           delete obj.definition.str;
-          ApiServer.put("/api/v1.1/schemas/" + schema.name)
-          .send(obj).expect(400, done);
+          await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+              .send(obj).expect(400);
       });
 
-      it("Should delete the date field", function(done) {
+      it("Should delete the date field", async function() {
           var obj = JSON.parse(JSON.stringify(schemaDoc));
           delete obj.definition.date;
-          ApiServer.put("/api/v1.1/schemas/" + schema.name)
-          .send(obj).expect(200, function(err, res) {
-              should.not.exist(err);
-              schemaDoc = res.body;
-              should.not.exist(schemaDoc.definition.date);
-              done();
-          });
+          schemaDoc = (await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+              .send(obj).expect(200)).body;
+          should.not.exist(schemaDoc.definition.date);
       });
-      it("Should delete the str field", function(done) {
+      it("Should delete the str field", async function() {
           var obj = JSON.parse(JSON.stringify(schemaDoc));
           delete obj.definition.str;
           obj[SIS.FIELD_LOCKED_FIELDS] = ["num"];
-          ApiServer.put("/api/v1.1/schemas/" + schema.name)
-          .send(obj).expect(200, function(err, res) {
-              should.not.exist(err);
-              schemaDoc = res.body;
-              should.not.exist(schemaDoc.definition.str);
-              done();
-          });
+          schemaDoc = (await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+              .send(obj).expect(200)).body;
+          should.not.exist(schemaDoc.definition.str);
       });
     });
 
@@ -498,41 +426,30 @@ describe('@API @V1.1API - Schema API', function() {
         var schemaDoc = null;
 
         // create the schema and add an entity
-        before(function(done) {
-            ApiServer.del('/api/v1.1/schemas/' + schema.name)
-                .end(function() {
-                ApiServer.post('/api/v1.1/schemas').send(schema)
-                .expect(201, function(err, result) {
-                    if (err) return done(err);
-                    schemaDoc = result.body;
-                    schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(false);
-                    done();
-                });
-            });
+        before(async function() {
+            await ApiServer.del('/api/v1.1/schemas/' + schema.name);
+            schemaDoc = (await ApiServer.post('/api/v1.1/schemas').send(schema).expect(201)).body;
+            schemaDoc._sis[SIS.FIELD_LOCKED].should.eql(false);
         });
-        after(function(done) {
-            ApiServer.del('/api/v1.1/schemas/' + schema.name).expect(200, done);
+        after(async function() {
+            await ApiServer.del('/api/v1.1/schemas/' + schema.name).expect(200);
         });
 
-        it("Should mark the schema immutable and add num", function(done) {
+        it("Should mark the schema immutable and add num", async function() {
             var obj = JSON.parse(JSON.stringify(schemaDoc));
             obj._sis[SIS.FIELD_IMMUTABLE] = true;
             obj.definition.num = "Number";
-            ApiServer.put("/api/v1.1/schemas/" + schema.name)
-            .send(obj).expect(200, function(err, res) {
-                should.not.exist(err);
-                schemaDoc = res.body;
-                schemaDoc._sis[SIS.FIELD_IMMUTABLE].should.eql(true);
-                schemaDoc.definition.num.should.eql("Number");
-                done();
-            });
+            schemaDoc = (await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+                .send(obj).expect(200)).body;
+            schemaDoc._sis[SIS.FIELD_IMMUTABLE].should.eql(true);
+            schemaDoc.definition.num.should.eql("Number");
         });
 
-        it("Should fail to update the schema", function(done) {
+        it("Should fail to update the schema", async function() {
            var obj = JSON.parse(JSON.stringify(schemaDoc));
            obj.definition.other = "Number";
-           ApiServer.put("/api/v1.1/schemas/" + schema.name)
-           .send(obj).expect(401, done);
+           await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+               .send(obj).expect(401);
         });
 
         [
@@ -541,45 +458,33 @@ describe('@API @V1.1API - Schema API', function() {
             ["lock", { locked : true }],
             ["owner while making it mutable", { owner : ["test", "test2"], immutable : false }]
         ].forEach(function(change) {
-            it("Should fail to change only the " + change[0] + " of the schema", function(done) {
+            it("Should fail to change only the " + change[0] + " of the schema", async function() {
                 var obj = JSON.parse(JSON.stringify(schemaDoc));
                 Object.keys(change[1]).forEach(function(k) {
                     obj._sis[k] = change[1][k];
                 });
-                ApiServer.put("/api/v1.1/schemas/" + schema.name)
-                .send(obj).expect(401, function(err) {
-                    if (err) { return done(err); }
-                    ApiServer.get("/api/v1.1/schemas/" + schema.name)
-                    .expect(200, function(err, res) {
-                        if (err) { return done(err); }
-                        res.body._sis.should.eql(schemaDoc._sis);
-                        done();
-                    });
-                });
+                await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+                    .send(obj).expect(401);
+                var res = await ApiServer.get("/api/v1.1/schemas/" + schema.name)
+                    .expect(200);
+                res.body._sis.should.eql(schemaDoc._sis);
             });
         });
 
-        it("Should make the schema mutable", function(done) {
+        it("Should make the schema mutable", async function() {
             var obj = JSON.parse(JSON.stringify(schemaDoc));
             obj._sis[SIS.FIELD_IMMUTABLE] = false;
-            ApiServer.put("/api/v1.1/schemas/" + schema.name)
-            .send(obj).expect(200, function(err, res) {
-                should.not.exist(err);
-                schemaDoc = res.body;
-                schemaDoc._sis[SIS.FIELD_IMMUTABLE].should.eql(false);
-                done();
-            });
+            schemaDoc = (await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+                .send(obj).expect(200)).body;
+            schemaDoc._sis[SIS.FIELD_IMMUTABLE].should.eql(false);
         });
 
-        it("Should update the schema now", function(done) {
+        it("Should update the schema now", async function() {
             var obj = JSON.parse(JSON.stringify(schemaDoc));
             obj.definition.other = "Number";
-            ApiServer.put("/api/v1.1/schemas/" + schema.name)
-            .send(obj).expect(200, function(err, res) {
-                var obj = res.body;
-                obj.definition.other.should.eql("Number");
-                done();
-            });
+            var res = await ApiServer.put("/api/v1.1/schemas/" + schema.name)
+                .send(obj).expect(200);
+            res.body.definition.other.should.eql("Number");
         });
     });
 
@@ -593,85 +498,57 @@ describe('@API @V1.1API - Schema API', function() {
         };
         var NUM_ENTITIES = 50;
 
-        var schemaDoc = null;
-
-        function addEntities(done) {
-            // add 100 entities
+        // create the schema and add entities
+        before(async function() {
+            await ApiServer.del('/api/v1.1/schemas/' + schema.name);
+            await ApiServer.post('/api/v1.1/schemas').send(schema).expect(201);
             var entities = [];
             for (var i = 0; i < NUM_ENTITIES; ++i) {
                 entities.push({
                     num : i
                 });
             }
-            ApiServer.post('/api/v1.1/entities/' + schema.name)
-            .send(entities).expect(200, function(err, res) {
-                if (err) { return done(err); }
-                should.exist(res.body.success);
-                should.exist(res.body.errors);
-                res.body.success.should.be.instanceof(Array);
-                res.body.success.length.should.eql(NUM_ENTITIES);
-                res.body.errors.should.be.instanceof(Array);
-                res.body.errors.length.should.eql(0);
-                done();
-            });
-        }
-
-        // create the schema and add entities
-        before(function(done) {
-            ApiServer.del('/api/v1.1/schemas/' + schema.name)
-                .end(function() {
-                ApiServer.post('/api/v1.1/schemas').send(schema)
-                .expect(201, function(err, result) {
-                    if (err) return done(err);
-                    schemaDoc = result.body;
-                    addEntities(done);
-                });
-            });
+            var res = await ApiServer.post('/api/v1.1/entities/' + schema.name)
+                .send(entities).expect(200);
+            should.exist(res.body.success);
+            should.exist(res.body.errors);
+            res.body.success.should.be.instanceof(Array);
+            res.body.success.length.should.eql(NUM_ENTITIES);
+            res.body.errors.should.be.instanceof(Array);
+            res.body.errors.length.should.eql(0);
         });
-        after(function(done) {
-            ApiServer.del('/api/v1.1/schemas/' + schema.name).expect(200, done);
+        after(async function() {
+            await ApiServer.del('/api/v1.1/schemas/' + schema.name).expect(200);
         });
         // tests
-        it("should not return total_counts by default", function(done) {
-            ApiServer.get("/api/v1.1/schemas").expect(200, function(err, res) {
-                should.not.exist(err);
-                res.body.should.be.instanceof(Array);
-                res.body.forEach(function(s) {
-                    s.should.not.have.property('entity_count');
-                });
-                done();
+        it("should not return total_counts by default", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas").expect(200);
+            res.body.should.be.instanceof(Array);
+            res.body.forEach(function(s) {
+                s.should.not.have.property('entity_count');
             });
         });
-        it("should not return total_counts by default (id)", function(done) {
-            ApiServer.get("/api/v1.1/schemas/" + schema.name).expect(200, function(err, res) {
-                should.not.exist(err);
-                res.body.should.not.have.property('entity_count');
-                done();
+        it("should not return total_counts by default (id)", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas/" + schema.name).expect(200);
+            res.body.should.not.have.property('entity_count');
+        });
+        it("should fetch entity_count on schema list", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas").query({ with_counts : true })
+                .expect(200);
+            res.body.should.be.instanceof(Array);
+            res.body.forEach(function(s) {
+                s.should.have.property('entity_count');
+                s.entity_count.should.be.instanceof(Number);
+                if (s.name === schema.name) {
+                    s.entity_count.should.eql(NUM_ENTITIES);
+                }
             });
         });
-        it("should fetch entity_count on schema list", function(done) {
-            ApiServer.get("/api/v1.1/schemas").query({ with_counts : true })
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                res.body.should.be.instanceof(Array);
-                res.body.forEach(function(s) {
-                    s.should.have.property('entity_count');
-                    s.entity_count.should.be.instanceof(Number);
-                    if (s.name === schema.name) {
-                        s.entity_count.should.eql(NUM_ENTITIES);
-                    }
-                });
-                done();
-            });
-        });
-        it("should fetch entity_count via ID", function(done) {
-            ApiServer.get("/api/v1.1/schemas/" + schema.name).query({with_counts : true})
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                res.body.should.have.property('entity_count');
-                res.body.entity_count.should.eql(NUM_ENTITIES);
-                done();
-            });
+        it("should fetch entity_count via ID", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas/" + schema.name).query({with_counts : true})
+                .expect(200);
+            res.body.should.have.property('entity_count');
+            res.body.entity_count.should.eql(NUM_ENTITIES);
         });
     });
 });

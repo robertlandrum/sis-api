@@ -5,40 +5,33 @@ describe('HookManager', function() {
     var should = require('should');
     var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
+    var expectError = TestUtil.expectError;
 
     var hookManager = null;
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            var schemaManager = require("../util/schema-manager")(mongoose, { auth : false});
-            hookManager = require('../util/hook-manager')(schemaManager);
-            done(err);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        var schemaManager = require("../util/schema-manager")(mongoose, { auth : false});
+        hookManager = require('../util/hook-manager')(schemaManager);
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
 
     describe('add-invalid-hook', function() {
-        it("should error adding an empty string ", function(done) {
+        it("should error adding an empty string ", async function() {
             var hook = "";
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /No model defined/);
         });
 
-        it("should error adding an empty object ", function(done) {
+        it("should error adding an empty object ", async function() {
             var hook = { };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook has no name/);
         });
 
 
-        it("should error adding a hook with no name ", function(done) {
+        it("should error adding a hook with no name ", async function() {
             var hook = {
                 "name" : "",
                 _sis : { "owner" : [ "Test" ] },
@@ -49,13 +42,10 @@ describe('HookManager', function() {
                 },
                 "events": ['insert','update']
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook has no name/);
         });
 
-        it("should error adding a hook with no owner ", function(done) {
+        it("should error adding a hook with no owner ", async function() {
             var hook = {
                 "name" : "test_hook",
                 "entity_type" : "Schema",
@@ -65,13 +55,11 @@ describe('HookManager', function() {
                 },
                 "events": ['insert','update']
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            // auth is off, so the model's validation catches it
+            await expectError(hookManager.add(hook), 400, /owner is required/);
         });
 
-        it("should error adding a hook with no entity_type ", function(done) {
+        it("should error adding a hook with no entity_type ", async function() {
             var hook = {
                 "name" : "test_hook",
                 _sis : { "owner" : [ "Test" ] },
@@ -81,25 +69,19 @@ describe('HookManager', function() {
                 },
                 "events": ['insert','update']
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook has no entity_type/);
         });
 
-        it("should error adding a hook with no target ", function(done) {
+        it("should error adding a hook with no target ", async function() {
             var hook = {
                 "name" : "test_hook",
                 _sis : { "owner" : ["Test"] },
                 "entity_type" : "Schema",
                 "events": ['insert','update']
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook has no target/);
         });
-        it("should error adding a hook with no target.url ", function(done) {
+        it("should error adding a hook with no target.url ", async function() {
             var hook = {
                 "name" : "test_hook",
                 _sis : { "owner" : ["Test"] },
@@ -109,12 +91,9 @@ describe('HookManager', function() {
                 },
                 "events": ['insert','update']
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook target has no url/);
         });
-        it("should error adding a hook with no target.action ", function(done) {
+        it("should error adding a hook with no target.action ", async function() {
             var hook = {
                 "name" : "test_hook",
                 _sis : { "owner" : ["Test"] },
@@ -124,12 +103,9 @@ describe('HookManager', function() {
                 },
                 "events": ['insert','update']
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook target has no action/);
         });
-        it("should error adding a hook with no events ", function(done) {
+        it("should error adding a hook with no events ", async function() {
             var hook = {
                 "name" : "test_hook",
                 _sis : { "owner" : ["Test"] },
@@ -139,12 +115,9 @@ describe('HookManager', function() {
                     "url" : "http://foo.bar.com/foo"
                 }
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook has no on parameter/);
         });
-        it("should error adding a hook with no event values ", function(done) {
+        it("should error adding a hook with no event values ", async function() {
             var hook = {
                 "name" : "test_hook",
                 _sis : { "owner" : ["Test"] },
@@ -155,20 +128,17 @@ describe('HookManager', function() {
                 },
                 "events": []
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(hookManager.add(hook), 400, /Hook on parameter has no values/);
         });
 
     });
 
     describe('add-valid-hook', function() {
         var hookName = "test_hook";
-        after(function(done) {
-            hookManager.delete(hookName).nodeify(done);
+        after(async function() {
+            await hookManager.delete(hookName);
         });
-        it("should add a valid hook object", function(done) {
+        it("should add a valid hook object", async function() {
             var hook = {
                 "name" : hookName,
                 _sis : { "owner" : [ "Test" ] },
@@ -179,16 +149,12 @@ describe('HookManager', function() {
                 },
                 "events": ['insert','update']
             };
-            hookManager.add(hook).nodeify(function(err, entity) {
-                should.not.exist(err);
+            var entity = await hookManager.add(hook);
+            entity.should.have.property('name', 'test_hook');
+            entity.should.have.property('entity_type', 'Schema');
+            entity.toObject().target.should.eql(hook.target);
 
-                entity.should.have.property('name', 'test_hook');
-                entity.should.have.property('entity_type', 'Schema');
-                entity.toObject().target.should.eql(hook.target);
-
-                JSON.stringify(entity.events).should.eql(JSON.stringify(hook.events));
-                done();
-            });
+            JSON.stringify(entity.events).should.eql(JSON.stringify(hook.events));
         });
     });
 
@@ -205,42 +171,20 @@ describe('HookManager', function() {
             "events": ['insert','update']
         };
 
-        before(function(done) {
-            hookManager.add(hook).nodeify(function(err, entity) {
-                if (err) {
-                    done(err);
-                    return;
-                }
-                done();
-            });
+        before(async function() {
+            await hookManager.add(hook);
         });
 
-        it("Should return false if hook dne ", function(done) {
-            hookManager.delete("dne").nodeify(function(err, result) {
-                should.exist(err);
-                should.not.exist(result);
-                done();
-            });
+        it("Should fail to delete a hook that does not exist", async function() {
+            await expectError(hookManager.delete("dne"), 404);
         });
 
-        it("Should return true if hook exists ", function(done) {
-            hookManager.delete(hookName).nodeify(function(err, result) {
-                should.not.exist(err);
-                /* jshint expr: true */
-                result.should.be.ok;
-                done(err);
-            });
+        it("Should delete the hook", async function() {
+            (await hookManager.delete(hookName)).name.should.eql(hookName);
         });
 
-        it("Should no longer exist ", function(done) {
-            // ensure it is null
-            hookManager.getById(hookName).done(function(result) {
-                should.not.exist(result);
-                done("should not exist");
-            }, function(err) {
-                // expected this
-                done();
-            });
+        it("Should no longer exist ", async function() {
+            await expectError(hookManager.getById(hookName), 404);
         });
 
     });
@@ -269,27 +213,18 @@ describe('HookManager', function() {
         };
 
         // create the hook
-        before(function(done) {
-            hookManager.add(initialHook).nodeify(function(err, result) {
-                if (err) return done(err);
-                done();
-            });
+        before(async function() {
+            await hookManager.add(initialHook);
         });
-        after(function(done) {
-            hookManager.delete(hookName).nodeify(done);
+        after(async function() {
+            await hookManager.delete(hookName);
         });
 
-        it("Should update the hook", function(done) {
-            // delete the num field, change bool to string, add field
-            hookManager.update(hookName, updatedHook).nodeify(function(err, updated) {
-                should.not.exist(err);
-                should.exist(updated);
-                updated = updated.updated;
-                updated.should.have.property('entity_type','EntityA');
-                updated.toObject().target.should.eql(updatedHook.target);
-                JSON.stringify(updated.events).should.eql(JSON.stringify(updatedHook.events));
-                done();
-            });
+        it("Should update the hook", async function() {
+            var updated = (await hookManager.update(hookName, updatedHook)).updated;
+            updated.should.have.property('entity_type','EntityA');
+            updated.toObject().target.should.eql(updatedHook.target);
+            JSON.stringify(updated.events).should.eql(JSON.stringify(updatedHook.events));
         });
     });
 
@@ -298,7 +233,7 @@ describe('HookManager', function() {
         var attempts = 0;
         var failuresLeft = 0;
 
-        before(function(done) {
+        before(async function() {
             var express = require('express');
             var app = express();
             app.use(express.json());
@@ -310,11 +245,11 @@ describe('HookManager', function() {
                 }
                 res.send("got " + req.body.event);
             });
-            receiver = app.listen(3337, done);
+            await new Promise(function(resolve) { receiver = app.listen(3337, resolve); });
         });
 
-        after(function(done) {
-            receiver.close(done);
+        after(async function() {
+            await new Promise(function(resolve) { receiver.close(resolve); });
         });
 
         async function addHook(name, url, retries) {

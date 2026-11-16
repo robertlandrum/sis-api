@@ -2,23 +2,19 @@ describe("Mongo Collection Naming", function() {
     "use strict";
 
     var should = require('should');
-    var util = require('util');
-    var async = require('async');
 
     var SIS = require("../util/constants");
     var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
     var schemaManager = null;
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
-            done(err);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
 
     describe("Schemas with plural and non plural", function() {
@@ -57,53 +53,33 @@ describe("Mongo Collection Naming", function() {
             });
         });
 
-        it("should add 5 entities to each", function(done) {
+        it("should add 5 entities to each", async function() {
             var items = [1, 2, 3, 4, 5];
-            var tasks = schemas.map(function(s) {
+            await Promise.all(schemas.map(function(s) {
                 var em = entityManagers[s.name];
-                var objs = items.map(function(num) {
-                    return {
+                return Promise.all(items.map(function(num) {
+                    return em.add({
                         name : s.name + "_" + num,
                         short_name : s.name + "_short_" + num
-                    };
-                });
-                return function(cb) {
-                    async.map(objs, function(obj, ocb) {
-                        em.add(obj).nodeify(ocb);
-                    }, cb);
-                };
-            });
-            async.parallel(tasks, done);
+                    });
+                }));
+            }));
         });
 
-        it("should only have 5 entities in each", function(done) {
-            var tasks = schemas.map(function(s) {
-                var em = entityManagers[s.name];
-                return function(cb) {
-                    em.model.find({}).exec().then(function(res) {
-                        res.length.should.eql(5);
-                        cb(null, res);
-                    }, cb);
-                };
-            });
-            async.parallel(tasks, done);
+        it("should only have 5 entities in each", async function() {
+            for (var s of schemas) {
+                (await entityManagers[s.name].model.find({}).exec()).length.should.eql(5);
+            }
         });
 
-        it("should have 2 different mongo collections with 5 items each", function(done) {
-            var mongoose = schemaManager.mongoose;
-            var db = mongoose.connection.db;
-            var tasks = schemas.map(function(s) {
-                return function(cb) {
-                    // modern driver: db.collection() is synchronous (no strict/callback)
-                    var collection = db.collection(s.name);
-                    should.exist(collection);
-                    collection.find().toArray().then(function(res) {
-                        res.length.should.eql(5);
-                        cb(null);
-                    }, cb);
-                };
-            });
-            async.series(tasks, done);
+        it("should have 2 different mongo collections with 5 items each", async function() {
+            var db = schemaManager.mongoose.connection.db;
+            for (var s of schemas) {
+                // modern driver: db.collection() is synchronous (no strict/callback)
+                var collection = db.collection(s.name);
+                should.exist(collection);
+                (await collection.find().toArray()).length.should.eql(5);
+            }
         });
 
     });

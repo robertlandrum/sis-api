@@ -25,20 +25,20 @@ with the `db__url` env var (nconf reads `__` as the nested-key separator), e.g.
 - `npm run build` - generate `build.json` (consumed by the `/info` endpoint).
 
 The build/test tooling was migrated off the obsolete grunt + jshint + blanket stack
-to npm scripts + `mocha` + `eslint` + `c8`. `.mocharc.yml` wires in two preload
-modules: `scripts/gen-build-info.js` (writes `build.json`) and
-`test/fixtures/promise-compat.js` (a test-only `Promise.prototype.nodeify`/`.done`
-shim - the managers used to return bluebird promises; this keeps the existing
-callback-bridge assertions working without touching production code).
+to npm scripts + `mocha` + `eslint` + `c8`. `.mocharc.yml` preloads
+`scripts/gen-build-info.js` (writes `build.json`) and lists every spec.
 
 ### Running a single test
 
 Tests use Mocha + `should` + `supertest`. `test/init-tests.js` should be listed first
 because it starts the shared local server (via `test/fixtures/util.js` →
 `server.startServer`) and seeds a `sistest_super` superuser; other specs reuse it.
+`--no-config` keeps mocha from running every spec `.mocharc.yml` lists, so pass the
+preload and `--exit` it would have:
 
 ```
-db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --timeout 60000 \
+db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --no-config \
+  --require scripts/gen-build-info.js --timeout 60000 --exit \
   test/init-tests.js test/v1.1-api/test-api-entities.js
 ```
 
@@ -141,9 +141,10 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   `util/`, the controllers in `routes/` and the endpoint code in `endpoints/` are
   converted: they are ES classes (`class X extends Manager`, with `super(...)` and
   `super.method(...)`) and use `async` methods, `try`/`catch` around awaited calls and
-  arrow callbacks instead of `var self = this`, and take no callbacks. The tests still
-  lean on callbacks and the `.nodeify`/`.done` shim. Write new code the converted way
-  and cover it in the style of `test/test-manager.js` (`async` mocha tests, with
+  arrow callbacks instead of `var self = this`, and take no callbacks. The manager specs
+  are `async` too; many API specs still use `done` callbacks. Write new code the
+  converted way and cover it in the style of `test/test-manager.js` (`async` mocha
+  tests, `await` on supertest requests and the `TestUtil` fixtures, and
   `TestUtil.expectError` for SIS error tuples).
 - Controller handlers are `async (req, res)` methods wrapped by `_wrapAuth` /
   `_wrapReadAuth`, which authenticate and send whatever the handler throws. A handler

@@ -51,27 +51,25 @@ describe('Manager', function() {
     var admin = { name : "admin_user", roles : { g1 : SIS.ROLE_ADMIN, g2 : SIS.ROLE_ADMIN } };
     var superUser = { name : "super", super_user : true };
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            if (err) { return done(err); }
-            Model = mongoose.models[MODEL_NAME];
-            if (!Model) {
-                var metaDef = Object.assign({}, require("../util/sis-schemas").metaDef);
-                metaDef.owner = { type : ["String"] };
-                var schema = new mongoose.Schema({
-                    name : { type : String, required : true, unique : true },
-                    num : { type : Number, min : 0 },
-                    _sis : metaDef
-                });
-                schema._sis_references = [];
-                Model = mongoose.model(MODEL_NAME, schema);
-            }
-            Model.init().then(function() { done(); }, done);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        Model = mongoose.models[MODEL_NAME];
+        if (!Model) {
+            var metaDef = Object.assign({}, require("../util/sis-schemas").metaDef);
+            metaDef.owner = { type : ["String"] };
+            var schema = new mongoose.Schema({
+                name : { type : String, required : true, unique : true },
+                num : { type : Number, min : 0 },
+                _sis : metaDef
+            });
+            schema._sis_references = [];
+            Model = mongoose.model(MODEL_NAME, schema);
+        }
+        await Model.init();
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
 
     beforeEach(function() {

@@ -137,9 +137,12 @@ class SchemaManager extends Manager {
         if (!(locked_fields instanceof Array)) {
             return SIS.FIELD_LOCKED_FIELDS + " must be an array.";
         }
+        var definition = modelObj.definition;
+        if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+            return "Schema definition must be an object.";
+        }
         try {
-            // object.keys will fail if the var is not an object..
-            var fields = Object.keys(modelObj.definition);
+            var fields = Object.keys(definition);
             if (!fields.length) {
                 return "Cannot add an empty schema.";
             }

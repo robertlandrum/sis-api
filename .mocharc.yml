@@ -3,7 +3,6 @@
 # init-tests.js is listed first so the shared local server boots before the suites.
 require:
   - ./scripts/gen-build-info.js
-  - ./test/fixtures/promise-compat.js
 spec:
   - test/init-tests.js
   - test/test-*.js
