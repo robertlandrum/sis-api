@@ -5,6 +5,9 @@
 var nconf = require('nconf');
 var mongoose = require("mongoose");
 var SIS = require("../util/constants");
+var logger = require("../util/logger");
+var createSchemaManager = require('../util/schema-manager');
+var ScriptRunner = require('./runner');
 
 if (process.env.TESTING) {
     nconf.env("__")
@@ -48,9 +51,8 @@ async function start() {
     var opts = nconf.get('db').opts || { };
     await mongoose.connect(nconf.get('db').url, opts);
     var appConfig = nconf.get('app') || { };
-    var schemaManager = require('../util/schema-manager')(mongoose, appConfig);
+    var schemaManager = createSchemaManager(mongoose, appConfig);
     await schemaManager.bootstrapEntitySchemas();
-    var ScriptRunner = require('./runner');
     var runner = new ScriptRunner(schemaManager);
     process.on("message", function(msg) {
         if (msg.type === SIS.EP_REQ) {
@@ -67,7 +69,7 @@ start().catch(function(err) {
 
 // a rejection a script leaves unhandled is the script's bug - log it rather
 // than let it end the process every endpoint shares
-var LOGGER = require("../util/logger").createLogger({ name : "ScriptProcess" });
+var LOGGER = logger.createLogger({ name : "ScriptProcess" });
 process.on("unhandledRejection", function(reason) {
     LOGGER.error({ err : reason }, "Unhandled rejection in a script");
 });

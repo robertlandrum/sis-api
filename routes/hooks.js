@@ -2,6 +2,7 @@
 
 var ApiController = require("./apicontroller");
 var SIS = require("../util/constants");
+var createHookManager = require("../util/hook-manager");
 
 // Hook controller
 class HookController extends ApiController {
@@ -12,7 +13,7 @@ class HookController extends ApiController {
         opts[SIS.OPT_USE_AUTH] = config[SIS.OPT_USE_AUTH];
         SIS.UTIL_MERGE_SHALLOW(opts, config);
         super(opts);
-        this.manager = require("../util/hook-manager")(this.sm, opts);
+        this.manager = createHookManager(this.sm, opts);
     }
 
     attach(app, prefix) {

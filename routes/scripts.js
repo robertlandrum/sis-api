@@ -2,6 +2,7 @@
 
 var ApiController = require("./apicontroller");
 var SIS = require("../util/constants");
+var createScriptManager = require("../util/script-manager");
 var nconf = require("nconf");
 
 // Scripts controller
@@ -13,7 +14,7 @@ class ScriptController extends ApiController {
         opts[SIS.OPT_USE_AUTH] = config[SIS.OPT_USE_AUTH];
         SIS.UTIL_MERGE_SHALLOW(opts, config);
         super(opts);
-        this.manager = require("../util/script-manager")(this.sm, opts);
+        this.manager = createScriptManager(this.sm, opts);
     }
 }
 

@@ -12,6 +12,10 @@ var Manager = require("./manager");
 var jsondiffpatch = require("jsondiffpatch");
 var logger = require("./logger");
 var createEntityManager = require("./entity-manager");
+var createUserManager = require("./user-manager");
+var createTokenManager = require("./token-manager");
+var sisSchemas = require("./sis-schemas");
+var registerTypes = require("./types");
 
 var LOGGER = logger.createLogger({
     name : "SchemaManager"
@@ -101,18 +105,17 @@ class SchemaManager extends Manager {
         super(null, Object.assign(managerOpts, opts));
         this.mongoose = mongoose;
         this.entitySchemaToUpdateTime = { };
-        require('./types')(mongoose);
-        var sisSchemas = require('./sis-schemas').schemas;
-        for (var i = 0; i < sisSchemas.length; ++i) {
-            this.getEntityModel(sisSchemas[i],true);
+        registerTypes(mongoose);
+        for (var i = 0; i < sisSchemas.schemas.length; ++i) {
+            this.getEntityModel(sisSchemas.schemas[i],true);
         }
         this.model = this.getSisModel(SIS.SCHEMA_SCHEMAS);
         if (this.authEnabled) {
             var auth = {};
-            auth[SIS.SCHEMA_USERS] = require("./user-manager")(this);
+            auth[SIS.SCHEMA_USERS] = createUserManager(this);
             this.auth = auth;
             // a token manager that is not associated with a user name
-            this.tokenFetcher = require("./token-manager")(this, null);
+            this.tokenFetcher = createTokenManager(this, null);
         }
         patchMongoose(mongoose);
         this.managerCache = { };
@@ -428,7 +431,7 @@ class SchemaManager extends Manager {
             definition[k] = sisSchema.definition[k];
         }
         // v1.1. - move these into _sis
-        var META_FIELDS = require('./sis-schemas').metaDef;
+        var META_FIELDS = sisSchemas.metaDef;
         var thisMetaDef = definition[SIS.FIELD_SIS_META] || { };
         var ignoredMeta = (isInternal ? sisSchema.ignored_meta : null) || [];
 
@@ -626,7 +629,7 @@ class SchemaManager extends Manager {
         if (!this.authEnabled) {
             return null;
         }
-        return require("./token-manager")(this, username);
+        return createTokenManager(this, username);
     }
 
     _createEntityManager(schema, opts) {

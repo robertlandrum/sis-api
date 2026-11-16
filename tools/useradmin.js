@@ -4,6 +4,7 @@
 var mongoose = require('mongoose');
 var nconf = require('nconf');
 var SIS = require('../util/constants');
+var createSchemaManager = require('../util/schema-manager');
 var fs = require('fs');
 
 if (process.argv.length != 4) {
@@ -65,7 +66,7 @@ function fail(msg, err) {
 var opts = nconf.get('db').opts || { };
 
 mongoose.connect(nconf.get('db').url, opts).then(function() {
-    var schemaManager = require('../util/schema-manager')(mongoose, appConfig);
+    var schemaManager = createSchemaManager(mongoose, appConfig);
     schemaManager.bootstrapEntitySchemas().then(function() {
         var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
         if (action === 'update') {
