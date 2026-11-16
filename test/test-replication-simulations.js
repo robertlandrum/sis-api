@@ -10,16 +10,13 @@ describe('Replication Simulation', function() {
 
   var schemaManager = null;
 
-  it("Should setup fixtures", function(done) {
-    ApiServer.start(function(err, serverData) {
-        if (err) { return done(err); }
-        schemaManager = serverData.schemaManager;
-        ApiServer.becomeSuperUser(done);
-    });
+  it("Should setup fixtures", async function() {
+    schemaManager = (await ApiServer.start()).schemaManager;
+    await ApiServer.becomeSuperUser();
   });
 
-  after(function(done) {
-    ApiServer.stop(done);
+  after(async function() {
+    await ApiServer.stop();
   });
 
   describe('schema update replicated', function() {
@@ -37,49 +34,32 @@ describe('Replication Simulation', function() {
         number : 100
     };
 
-    before(function(done) {
-        schemaManager.objectRemoved(schema).then(function() {
-            ApiServer.post("/api/v1.1/schemas").send(schema)
-                .expect(201, function(err, res) {
-                if (err) { return done(err); }
-                schema = res.body;
-                ApiServer.post("/api/v1.1/entities/" + schema.name)
-                    .send(entity).expect(201, function(err, res) {
-                    if (err) { return done(err); }
-                    // simulate a schema update
-                    schema._sis._updated_at += 1000;
-                    delete schema._id;
-                    schema.definition.bool = { type : "Boolean", default : true };
-                    schemaManager.model.updateOne({ name : schema.name}, schema).exec().then(function() { done(); }, done);
-                });
-            });
-        });
+    before(async function() {
+        await schemaManager.objectRemoved(schema);
+        schema = (await ApiServer.post("/api/v1.1/schemas").send(schema).expect(201)).body;
+        await ApiServer.post("/api/v1.1/entities/" + schema.name).send(entity).expect(201);
+        // simulate a schema update
+        schema._sis._updated_at += 1000;
+        delete schema._id;
+        schema.definition.bool = { type : "Boolean", default : true };
+        await schemaManager.model.updateOne({ name : schema.name}, schema).exec();
     });
-    it("should fetch an entity without number", function(done) {
-        ApiServer.get("/api/v1.1/entities/" + schema.name)
-            .expect(200, function(err, res) {
-            should.not.exist(err);
-            var entities = res.body;
-            res.body.length.should.eql(1);
-            var entity = res.body[0];
-            should.exist(entity.bool);
-            done();
-        });
+    it("should fetch the entity with the replicated definition", async function() {
+        var res = await ApiServer.get("/api/v1.1/entities/" + schema.name)
+            .expect(200);
+        res.body.length.should.eql(1);
+        // the default of the field the update added
+        res.body[0].bool.should.eql(true);
     });
-    it("should return a 404", function(done) {
+    it("should return a 404", async function() {
         // delete the model
-        schemaManager.model.deleteMany({ name : schema.name }).exec().then(function(res) {
-            // now expect a 404
-            ApiServer.get("/api/v1.1/entities/" + schema.name)
-                .expect(404, done);
-        }, function(err) { return done(err); });
+        await schemaManager.model.deleteMany({ name : schema.name }).exec();
+        // now expect a 404
+        await ApiServer.get("/api/v1.1/entities/" + schema.name)
+            .expect(404);
     });
-    after(function(done) {
-        schemaManager.objectRemoved(schema).then(function() {
-            done();
-        }, function(e) {
-            done(e);
-        });
+    after(async function() {
+        await schemaManager.objectRemoved(schema);
     });
   });
 });

@@ -9,15 +9,13 @@ describe('@API @V1.1API - Upsert', function() {
     var ApiServer = new TestUtil.TestServer();
 
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) { return done(e); }
-            ApiServer.becomeSuperUser(done);
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
     describe("Upsert schemas", function() {
@@ -32,31 +30,28 @@ describe('@API @V1.1API - Upsert', function() {
             }
         };
 
-        before(function(done) {
-            ApiServer.del("/api/v1.1/schemas/test_upsert_1").end(done);
+        before(async function() {
+            await ApiServer.del("/api/v1.1/schemas/test_upsert_1");
         });
 
-        it("Should insert the schema", function(done) {
-            ApiServer.put("/api/v1.1/schemas/test_upsert_1")
+        it("Should insert the schema", async function() {
+            await ApiServer.put("/api/v1.1/schemas/test_upsert_1")
                 .query({ upsert : true }).send(schema)
-                .expect(201, done);
+                .expect(201);
         });
 
-        it("Should update the schema", function(done) {
+        it("Should update the schema", async function() {
             schema.id_field = 'short_name';
-            ApiServer.put("/api/v1.1/schemas/test_upsert_1")
+            var res = await ApiServer.put("/api/v1.1/schemas/test_upsert_1")
                 .query({ upsert : true }).send(schema)
-                .expect(200, function(err, res) {
-                    if (err) { return done(err); }
-                    res.body.id_field.should.eql('short_name');
-                    done();
-                });
+                .expect(200);
+            res.body.id_field.should.eql('short_name');
         });
 
-        it("Should not insert with mismatched IDs", function(done) {
-            ApiServer.put("/api/v1.1/schemas/test_upsert_bad")
+        it("Should not insert with mismatched IDs", async function() {
+            await ApiServer.put("/api/v1.1/schemas/test_upsert_bad")
                 .query({ upsert : true }).send(schema)
-                .expect(400, done);
+                .expect(400);
         });
 
     });
@@ -72,25 +67,23 @@ describe('@API @V1.1API - Upsert', function() {
             }
         };
 
-        before(function(done) {
-            ApiServer.del("/api/v1.1/schemas/test_upsert_2")
-            .end(function(err, res) {
-                ApiServer.post("/api/v1.1/schemas").send(schema)
-                .expect(201, done);
-            });
+        before(async function() {
+            await ApiServer.del("/api/v1.1/schemas/test_upsert_2");
+            await ApiServer.post("/api/v1.1/schemas").send(schema)
+                .expect(201);
         });
 
-        it("Should fail to upsert with no id field", function(done) {
+        it("Should fail to upsert with no id field", async function() {
             var entity = {
                 name : "foobar",
                 short_name : "foobar_short",
                 other : "foobar"
             };
-            ApiServer.put("/api/v1.1/entities/test_upsert_2/foobar")
-            .query({ upsert : true }).send(entity).expect(400, done);
+            await ApiServer.put("/api/v1.1/entities/test_upsert_2/foobar")
+                .query({ upsert : true }).send(entity).expect(400);
         });
 
-        it("Should upsert with an id field", function(done) {
+        it("Should upsert with an id field", async function() {
             schema.id_field = 'name';
             schema.definition.name.unique = true;
             schema.definition.name.required = true;
@@ -100,44 +93,39 @@ describe('@API @V1.1API - Upsert', function() {
                 short_name : "foobar_short",
                 other : "foobar"
             };
-            ApiServer.put("/api/v1.1/schemas/test_upsert_2").send(schema)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                ApiServer.put("/api/v1.1/entities/test_upsert_2/foobar")
-                .query({ upsert : true }).send(entity).expect(201, done);
-            });
+            await ApiServer.put("/api/v1.1/schemas/test_upsert_2").send(schema)
+                .expect(200);
+            await ApiServer.put("/api/v1.1/entities/test_upsert_2/foobar")
+                .query({ upsert : true }).send(entity).expect(201);
         });
 
-        it("Should not upsert with mismatched ids", function(done) {
+        it("Should not upsert with mismatched ids", async function() {
             var entity = {
                 name : "foobar",
                 short_name : "foobar_short",
                 other : "foobar"
             };
-            ApiServer.put("/api/v1.1/entities/test_upsert_2/bar")
-            .query({ upsert : true }).send(entity).expect(400, done);
+            await ApiServer.put("/api/v1.1/entities/test_upsert_2/bar")
+                .query({ upsert : true }).send(entity).expect(400);
         });
 
-        it("Should upsert if the id has dots", function(done) {
+        it("Should upsert if the id has dots", async function() {
             var entity = {
                 name : "foo.bar.baz",
                 short_name: "foo.bar.short",
                 other : "baz"
             };
-            ApiServer.put("/api/v1.1/entities/test_upsert_2/foo.bar.baz")
-                .query({ upsert : true }).send(entity).expect(201, done);
+            await ApiServer.put("/api/v1.1/entities/test_upsert_2/foo.bar.baz")
+                .query({ upsert : true }).send(entity).expect(201);
         });
 
-        it("Should report why an existing entity could not be updated", function(done) {
+        it("Should report why an existing entity could not be updated", async function() {
             // foobar exists, so a failed update must not fall back to an add
             var entity = { name : "foobar", other : "changed" };
-            ApiServer.put("/api/v1.1/entities/test_upsert_2/foobar")
-            .query({ upsert : true, cas : JSON.stringify({ other : "not_foobar" }) })
-            .send(entity).expect(400, function(err, res) {
-                should.not.exist(err);
-                res.body.error.should.match(/CAS update failed/);
-                done();
-            });
+            var res = await ApiServer.put("/api/v1.1/entities/test_upsert_2/foobar")
+                .query({ upsert : true, cas : JSON.stringify({ other : "not_foobar" }) })
+                .send(entity).expect(400);
+            res.body.error.should.match(/CAS update failed/);
         });
 
     });

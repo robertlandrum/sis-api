@@ -2,7 +2,6 @@ describe('@API @V1.1API - Bulk Insert API', function() {
     "use strict";
 
     var should = require('should');
-    var async = require('async');
 
     var SIS = require("../../util/constants");
 
@@ -19,22 +18,15 @@ describe('@API @V1.1API - Bulk Insert API', function() {
         }
     };
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) { return done(e); }
-            ApiServer.becomeSuperUser(function(e) {
-                if (e) { return done(e); }
-                ApiServer.del('/api/v1.1/schemas/test_bulk_entity')
-                .end(function() {
-                    ApiServer.post('/api/v1.1/schemas')
-                        .send(schema).expect(201, done);
-                });
-            });
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
+        await ApiServer.del('/api/v1.1/schemas/test_bulk_entity');
+        await ApiServer.post('/api/v1.1/schemas').send(schema).expect(201);
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
     var getQuery = function(start, num) {
@@ -54,7 +46,8 @@ describe('@API @V1.1API - Bulk Insert API', function() {
         return result;
     };
 
-    var verifyItems = function(start, num, items, done) {
+    // the items are start .. start + num, and each was stored with its commit
+    var verifyItems = async function(start, num, items) {
         items = items.sort(function(i1, i2) {
             return i1.num - i2.num;
         });
@@ -64,156 +57,123 @@ describe('@API @V1.1API - Bulk Insert API', function() {
         var query = {
             q : getQuery(start, num)
         };
-        var asyncFunc = async.mapSeries.bind(async);
+        var res = (await ApiServer.get("/api/v1.1/entities/" + schema.name)
+            .query(query)
+            .expect(200)).body;
+        res.should.be.instanceof(Array);
+        res.length.should.eql(num);
+        // ensure commits
+        var verifyCommit = async function(item) {
+            var path = [
+                "/api/v1.1/entities",
+                schema.name,
+                item._id,
+                "commits"
+            ].join("/");
+            var r = (await ApiServer.get(path).expect(200)).body;
+            r.should.be.instanceof(Array);
+            r.length.should.be.eql(1);
+            r[0].action.should.eql("insert");
+        };
         if (process.env.SIS_REMOTE_URL) {
-            asyncFunc = async.map.bind(async);
+            await Promise.all(res.map(verifyCommit));
+        } else {
+            for (var item of res) {
+                await verifyCommit(item);
+            }
         }
-        ApiServer.get("/api/v1.1/entities/" + schema.name)
-        .query(query)
-        .expect(200, function(err, res) {
-            should.not.exist(err);
-            res = res.body;
-            res.should.be.instanceof(Array);
-            res.length.should.eql(num);
-            // ensure commits
-            asyncFunc(res, function(item, cb) {
-                var path = [
-                    "/api/v1.1/entities",
-                    schema.name,
-                    item._id,
-                    "commits"
-                ].join("/");
-                ApiServer.get(path).expect(200, function(e, r) {
-                    should.not.exist(e);
-                    r = r.body;
-                    r.should.be.instanceof(Array);
-                    r.length.should.be.eql(1);
-                    var commit = r[0];
-                    commit.action.should.eql("insert");
-                    cb(e);
-                });
-            }, function(e) {
-                done(e);
-            });
-        });
     };
 
-    it("should return a 400", function(done) {
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
+    // the response of a bulk add with nsuccess added and nerrors failed
+    var expectBulkResult = function(res, nsuccess, nerrors) {
+        should.exist(res.body);
+        should.exist(res.body.success);
+        should.exist(res.body.errors);
+        res.body.success.should.be.instanceof(Array);
+        res.body.success.length.should.eql(nsuccess);
+        res.body.errors.should.be.instanceof(Array);
+        res.body.errors.length.should.eql(nerrors);
+    };
+
+    it("should return a 400", async function() {
+        await ApiServer.post("/api/v1.1/entities/" + schema.name)
             .send([])
-            .expect(400, function(err, res) {
-                done(err);
-            });
+            .expect(400);
     });
 
-    it("should add 200 items", function(done) {
+    it("should add 200 items", async function() {
         var start = 0, num = 200;
-        var items = createItems(start, num);
         this.timeout(num * 1000);
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
-            .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                should.exist(res.body);
-                should.exist(res.body.success);
-                should.exist(res.body.errors);
-                res.body.success.should.be.instanceof(Array);
-                res.body.success.length.should.eql(num);
-                res.body.errors.should.be.instanceof(Array);
-                res.body.errors.length.should.eql(0);
-                verifyItems(start, num, res.body.success, done);
-            });
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
+            .send(createItems(start, num))
+            .expect(200);
+        expectBulkResult(res, num, 0);
+        await verifyItems(start, num, res.body.success);
     });
 
-    it("should add 200 more items", function(done) {
+    it("should add 200 more items", async function() {
         var start = 1000, num = 200;
-        var items = createItems(start, num);
         this.timeout(num * 1000);
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
-            .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                should.exist(res.body);
-                should.exist(res.body.success);
-                should.exist(res.body.errors);
-                res.body.success.should.be.instanceof(Array);
-                res.body.success.length.should.eql(num);
-                res.body.errors.should.be.instanceof(Array);
-                res.body.errors.length.should.eql(0);
-                verifyItems(start, num, res.body.success, done);
-            });
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
+            .send(createItems(start, num))
+            .expect(200);
+        expectBulkResult(res, num, 0);
+        await verifyItems(start, num, res.body.success);
     });
 
-    it("should fail to add any of the items", function(done) {
+    it("should fail to add any of the items", async function() {
         var start = 2000, num = 50;
         var items = createItems(start, num);
         items = items.concat(createItems(start, num));
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
             .query({ all_or_none : true })
             .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                should.exist(res.body.success);
-                should.exist(res.body.errors);
-                res.body.success.length.should.eql(0);
-                res.body.errors.length.should.eql(num);
-                // ensure nothing was added in the DB
-                var query = { q : getQuery(start, num) };
-                ApiServer.get("/api/v1.1/entities/" + schema.name)
-                    .query(query)
-                    .expect(200, function(err, res) {
-                        should.not.exist(err);
-                        res.body.should.be.instanceof(Array);
-                        res.body.length.should.eql(0);
-                        done();
-                    });
-            });
+            .expect(200);
+        expectBulkResult(res, 0, num);
+        // ensure nothing was added in the DB
+        var query = { q : getQuery(start, num) };
+        res = await ApiServer.get("/api/v1.1/entities/" + schema.name)
+            .query(query)
+            .expect(200);
+        res.body.should.be.instanceof(Array);
+        res.body.length.should.eql(0);
     });
 
-    it("should add some of the items", function(done) {
+    it("should add some of the items", async function() {
         var start = 3000, num = 50;
         var items = createItems(start, num);
         items = items.concat(createItems(start, num));
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
             .query({ all_or_none : false })
             .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                should.exist(res.body.success);
-                should.exist(res.body.errors);
-                res.body.success.length.should.eql(num);
-                res.body.errors.length.should.eql(num);
-                verifyItems(start, num, res.body.success, done);
-            });
+            .expect(200);
+        expectBulkResult(res, num, num);
+        await verifyItems(start, num, res.body.success);
     });
 
-    it("should report what was added when items also fail validation", function(done) {
+    it("should report what was added when items also fail validation", async function() {
         // 3000 was added above, "abc" is not a number, 6000 is new
         var items = [{ num : 3000 }, { num : "abc" }, { num : 6000 }];
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
             .query({ all_or_none : false })
             .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                res.body.success.map(function(s) { return s.num; }).should.eql([6000]);
-                res.body.errors.length.should.eql(2);
-                res.body.errors.map(function(e) { return e.value.num; }).should.containDeep([3000]);
-                verifyItems(6000, 1, res.body.success, done);
-            });
+            .expect(200);
+        res.body.success.map(function(s) { return s.num; }).should.eql([6000]);
+        res.body.errors.length.should.eql(2);
+        res.body.errors.map(function(e) { return e.value.num; }).should.containDeep([3000]);
+        await verifyItems(6000, 1, res.body.success);
     });
 
     describe("with Auth failures", function() {
         var users = AuthFixture.createUsers();
         var userToTokens = { };
 
-        before(function(done) {
-            AuthFixture.initUsers(ApiServer, ApiServer.authToken, users, function(err, res) {
-                if (err) { return done(err); }
-                AuthFixture.createTempTokens(ApiServer, userToTokens, users, done);
-            });
+        before(async function() {
+            await AuthFixture.initUsers(ApiServer, ApiServer.authToken, users);
+            await AuthFixture.createTempTokens(ApiServer, userToTokens, users);
         });
 
-        it("should add test_g1 entities, but not test_g2", function(done) {
+        it("should add test_g1 entities, but not test_g2", async function() {
             var start = 4000, num = 20;
             var items = createItems(start, num);
             var failStart = 5000;
@@ -224,23 +184,20 @@ describe('@API @V1.1API - Bulk Insert API', function() {
             });
             var all = [].concat(items).concat(failures);
             var token = userToTokens.admin1.name;
-            ApiServer.post("/api/v1.1/entities/" + schema.name, token)
+            var res = await ApiServer.post("/api/v1.1/entities/" + schema.name, token)
                 .query({ all_or_none : false })
                 .send(all)
-                .expect(200, function(err, res) {
-                    should.not.exist(err);
-                    res.body.success.length.should.eql(num);
-                    res.body.errors.length.should.eql(failNum);
-                    res.body.success.forEach(function(s) {
-                        s.num.should.be.above(start - 1);
-                        s.num.should.not.be.above(start + num);
-                    });
-                    res.body.errors.forEach(function(e) {
-                        e.value.num.should.be.above(failStart - 1);
-                        e.value.num.should.not.be.above(failStart + failNum);
-                    });
-                    done();
-                });
+                .expect(200);
+            res.body.success.length.should.eql(num);
+            res.body.errors.length.should.eql(failNum);
+            res.body.success.forEach(function(s) {
+                s.num.should.be.above(start - 1);
+                s.num.should.not.be.above(start + num);
+            });
+            res.body.errors.forEach(function(e) {
+                e.value.num.should.be.above(failStart - 1);
+                e.value.num.should.not.be.above(failStart + failNum);
+            });
         });
     });
 });

@@ -2,7 +2,6 @@ describe('@API @V1.1API - Bulk Delete API', function() {
     "use strict";
 
     var should = require('should');
-    var async = require('async');
 
     var SIS = require("../../util/constants");
 
@@ -19,22 +18,15 @@ describe('@API @V1.1API - Bulk Delete API', function() {
         }
     };
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) { return done(e); }
-            ApiServer.becomeSuperUser(function(e) {
-                if (e) { return done(e); }
-                ApiServer.del('/api/v1.1/schemas/test_bulk_del_entity')
-                .end(function() {
-                    ApiServer.post('/api/v1.1/schemas')
-                        .send(schema).expect(201, done);
-                });
-            });
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
+        await ApiServer.del('/api/v1.1/schemas/test_bulk_del_entity');
+        await ApiServer.post('/api/v1.1/schemas').send(schema).expect(201);
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
     var getQuery = function(start, num) {
@@ -54,118 +46,95 @@ describe('@API @V1.1API - Bulk Delete API', function() {
         return result;
     };
 
-    var verifyDeletedItems = function(items, done) {
-        var asyncFunc = async.mapSeries.bind(async);
-        if (process.env.SIS_REMOTE_URL) {
-            asyncFunc = async.map.bind(async);
-        }
-        asyncFunc(items, function(item, cb) {
+    // the items are gone, and their commits are the insert and the delete
+    var verifyDeletedItems = async function(items) {
+        var verify = async function(item) {
             var parts = [
                 "/api/v1.1/entities",
                 schema.name,
                 item._id
             ];
-            ApiServer.get(parts.join("/"))
-            .expect(404, function(err, res) {
-                should.not.exist(err);
-                // commits
-                parts.push("commits");
-                ApiServer.get(parts.join("/"))
-                .expect(200, function(e, r) {
-                    should.not.exist(e);
-                    r = r.body;
-                    r.should.be.instanceof(Array);
-                    r.length.should.be.eql(2);
-                    r[1].action.should.eql("insert");
-                    r[0].action.should.eql("delete");
-                    cb(e, r.body);
-                });
-            });
-        }, done);
+            await ApiServer.get(parts.join("/")).expect(404);
+            // commits
+            parts.push("commits");
+            var r = (await ApiServer.get(parts.join("/")).expect(200)).body;
+            r.should.be.instanceof(Array);
+            r.length.should.be.eql(2);
+            r[1].action.should.eql("insert");
+            r[0].action.should.eql("delete");
+        };
+        if (process.env.SIS_REMOTE_URL) {
+            await Promise.all(items.map(verify));
+        } else {
+            for (var item of items) {
+                await verify(item);
+            }
+        }
     };
 
-    it("should return a 400", function(done) {
+    it("should return a 400", async function() {
         var start = 0, num = 50;
-        var items = createItems(start, num);
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
-            .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                res.body.success.length.should.eql(num);
-                ApiServer.del("/api/v1.1/entities/" + schema.name)
-                .expect(400, function(err, res) {
-                    done(err);
-                });
-            });
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
+            .send(createItems(start, num))
+            .expect(200);
+        res.body.success.length.should.eql(num);
+        await ApiServer.del("/api/v1.1/entities/" + schema.name)
+            .expect(400);
     });
 
-    it("should delete 150 items", function(done) {
+    it("should delete 150 items", async function() {
         var start = 1000, num = 150;
-        var items = createItems(start, num);
         this.timeout(num * 1000);
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
-            .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                var success = res.body.success;
-                success.length.should.eql(num);
-                // delete all of them
-                var query = { q : getQuery(start, num) };
-                ApiServer.del("/api/v1.1/entities/" + schema.name)
-                    .query(query)
-                    .expect(200, function(err, res) {
-                        should.not.exist(err);
-                        should.exist(res.body.success);
-                        should.exist(res.body.errors);
-                        res.body.success.should.be.instanceof(Array);
-                        res.body.success.length.should.be.eql(num);
-                        verifyDeletedItems(res.body.success, done);
-                    });
-            });
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
+            .send(createItems(start, num))
+            .expect(200);
+        res.body.success.length.should.eql(num);
+        // delete all of them
+        var query = { q : getQuery(start, num) };
+        res = await ApiServer.del("/api/v1.1/entities/" + schema.name)
+            .query(query)
+            .expect(200);
+        should.exist(res.body.success);
+        should.exist(res.body.errors);
+        res.body.success.should.be.instanceof(Array);
+        res.body.success.length.should.be.eql(num);
+        await verifyDeletedItems(res.body.success);
     });
 
-    it("should delete even items", function(done) {
+    it("should delete even items", async function() {
         var start = 2000, num = 150;
-        var items = createItems(start, num);
         this.timeout(num * 1000);
-        ApiServer.post("/api/v1.1/entities/" + schema.name)
-            .send(items)
-            .expect(200, function(err, res) {
-                should.not.exist(err);
-                var success = res.body.success;
-                success.length.should.eql(num);
-                // delete all of them
-                var query = {
-                    q : {
-                        num : { $mod : [2, 0],
-                                $gte : start,
-                                $lt : (start + num)
-                              }
-                    }
-                };
-                ApiServer.del("/api/v1.1/entities/" + schema.name)
-                    .query(query)
-                    .expect(200, function(err, res) {
-                        should.not.exist(err);
-                        res.body.success.should.be.instanceof(Array);
-                        res.body.success.length.should.be.eql(num / 2);
-                        verifyDeletedItems(res.body.success, done);
-                    });
-            });
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
+            .send(createItems(start, num))
+            .expect(200);
+        res.body.success.length.should.eql(num);
+        // delete all of them
+        var query = {
+            q : {
+                num : { $mod : [2, 0],
+                        $gte : start,
+                        $lt : (start + num)
+                      }
+            }
+        };
+        res = await ApiServer.del("/api/v1.1/entities/" + schema.name)
+            .query(query)
+            .expect(200);
+        res.body.success.should.be.instanceof(Array);
+        res.body.success.length.should.be.eql(num / 2);
+        await verifyDeletedItems(res.body.success);
     });
 
     describe("with Auth failures", function() {
         var users = AuthFixture.createUsers();
         var userToTokens = { };
 
-        before(function(done) {
-            AuthFixture.initUsers(ApiServer, ApiServer.authToken, users, function(err, res) {
-                if (err) { return done(err); }
-                AuthFixture.createTempTokens(ApiServer, userToTokens, users, done);
-            });
+        before(async function() {
+            await AuthFixture.initUsers(ApiServer, ApiServer.authToken, users);
+            await AuthFixture.createTempTokens(ApiServer, userToTokens, users);
         });
 
-        it("should delete test_g1 entities, but not test_g2", function(done) {
+        it("should delete test_g1 entities, but not test_g2", async function() {
             var start = 4000, num = 20;
             var items = createItems(start, num);
             var failStart = 5000;
@@ -177,25 +146,21 @@ describe('@API @V1.1API - Bulk Delete API', function() {
             var all = [].concat(items).concat(failures);
             // add as super
             this.timeout(num * 1000);
-            ApiServer.post("/api/v1.1/entities/" + schema.name)
+            var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
                 .send(all)
-                .expect(200, function(err, res) {
-                    should.not.exist(err);
-                    res.body.success.length.should.eql(all.length);
-                    // delete all as admin1
-                    var query = {
-                        q : { num : { $gte : start } }
-                    };
-                    var token = userToTokens.admin1.name;
-                    ApiServer.del("/api/v1.1/entities/" + schema.name, token)
-                    .query(query)
-                    .expect(200, function(err, res) {
-                        should.not.exist(err);
-                        res.body.success.length.should.eql(num);
-                        res.body.errors.length.should.eql(failNum);
-                        verifyDeletedItems(res.body.success, done);
-                    });
-                });
+                .expect(200);
+            res.body.success.length.should.eql(all.length);
+            // delete all as admin1
+            var query = {
+                q : { num : { $gte : start } }
+            };
+            var token = userToTokens.admin1.name;
+            res = await ApiServer.del("/api/v1.1/entities/" + schema.name, token)
+                .query(query)
+                .expect(200);
+            res.body.success.length.should.eql(num);
+            res.body.errors.length.should.eql(failNum);
+            await verifyDeletedItems(res.body.success);
         });
     });
 });

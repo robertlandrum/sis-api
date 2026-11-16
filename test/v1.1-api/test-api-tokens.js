@@ -2,7 +2,6 @@ describe('@API @V1.1API - Authorization API Tokens', function() {
     "use strict";
 
     var should = require('should');
-    var async = require('async');
 
     var SIS = require("../../util/constants");
 
@@ -11,29 +10,16 @@ describe('@API @V1.1API - Authorization API Tokens', function() {
 
     var ApiServer = new TestUtil.TestServer();
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(err) {
-            if (err) {
-                console.log(err);
-                return done(err);
-            }
-            // issue create requests
-            var creds = ApiServer.getSuperCreds();
-            ApiServer.getTempToken(creds.username, creds.password,
-            function(e, t) {
-                if (e) {
-                    console.log(e);
-                    return done(e);
-                }
-                var token = t.name;
-                var users = AuthFixture.createUsers();
-                AuthFixture.initUsers(ApiServer, token, users, done);
-            });
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        // issue create requests
+        var creds = ApiServer.getSuperCreds();
+        var t = await ApiServer.getTempToken(creds.username, creds.password);
+        await AuthFixture.initUsers(ApiServer, t.name, AuthFixture.createUsers());
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
     var users = AuthFixture.createUsers();
@@ -43,40 +29,30 @@ describe('@API @V1.1API - Authorization API Tokens', function() {
     describe("create tokens", function() {
         userNames.forEach(function(name) {
             var testName = "should create tokens for " + name;
-            it(testName, function(done) {
+            it(testName, async function() {
                 // first token is a temp token
                 var user = users[name];
-                ApiServer.getTempToken(name, name, function(err, token) {
-                    if (err) {
-                        console.log(err);
-                    }
-                    should.not.exist(err);
-                    should.exist(token);
-                    name.should.eql(token.username);
-                    token.should.have.property('expires');
-                    // now use the token to create a persistent token
-                    var data = {
-                        'desc' : 'persistent token'
-                    };
-                    var req = ApiServer.post("/api/v1.1/users/" + name + "/tokens", token.name)
-                                  .send(data);
-                    if (user.super_user) {
-                        req.expect(400, function(err, res) {
-                            userToTokens[name] = [token];
-                            done();
-                        });
-                    } else {
-                        req.expect(201, function(err, res) {
-                            should.not.exist(err);
-                            var ptoken = res.body;
-                            should.exist(ptoken);
-                            name.should.eql(ptoken.username);
-                            // store the tokens
-                            userToTokens[name] = [token, ptoken];
-                            done();
-                        });
-                    }
-                });
+                var token = await ApiServer.getTempToken(name, name);
+                should.exist(token);
+                name.should.eql(token.username);
+                token.should.have.property('expires');
+                // now use the token to create a persistent token
+                var data = {
+                    'desc' : 'persistent token'
+                };
+                var req = ApiServer.post("/api/v1.1/users/" + name + "/tokens", token.name)
+                              .send(data);
+                if (user.super_user) {
+                    // super users get no persistent tokens
+                    await req.expect(400);
+                    userToTokens[name] = [token];
+                } else {
+                    var ptoken = (await req.expect(201)).body;
+                    should.exist(ptoken);
+                    name.should.eql(ptoken.username);
+                    // store the tokens
+                    userToTokens[name] = [token, ptoken];
+                }
             });
         });
     });
@@ -110,68 +86,51 @@ describe('@API @V1.1API - Authorization API Tokens', function() {
             var passes = admin_test.pass;
             passes.forEach(function(pass) {
                 var testName = name + " should get tokens for " + pass;
-                it(testName, function(done) {
+                it(testName, async function() {
                     var reqToken = userToTokens[name][0].name;
-                    ApiServer.get('/api/v1.1/users/' + pass + '/tokens', reqToken)
-                        .expect(200, function(err, res) {
-                        if (err) {
-                            console.log(JSON.stringify(err));
-                            console.log(JSON.stringify(res.body));
-                        }
-                        should.not.exist(err);
-                        res.body.should.be.an.instanceOf(Array);
-                        done();
-                    });
+                    var res = await ApiServer.get('/api/v1.1/users/' + pass + '/tokens', reqToken)
+                        .expect(200);
+                    res.body.should.be.an.instanceOf(Array);
                 });
             });
             var fails = admin_test.fail;
             fails.forEach(function(fail) {
                 var testName = name + " should not get tokens for " + fail;
-                it(testName, function(done) {
+                it(testName, async function() {
                     var reqToken = userToTokens[name][0].name;
-                    ApiServer.get('/api/v1.1/users/' + fail + '/tokens', reqToken)
-                        .expect(401, function(err, res) {
-                        should.not.exist(err);
-                        done();
-                    });
+                    await ApiServer.get('/api/v1.1/users/' + fail + '/tokens', reqToken)
+                        .expect(401);
                 });
             });
         });
 
         // some sanity tests
         // ensure that a user's token can't be accessed at the wrong path
-        it("superman token should not show up under superman2", function(done) {
+        it("superman token should not show up under superman2", async function() {
             var reqToken = userToTokens.superman[0].name;
             var tokenToReq = userToTokens.superman2[0].name;
             var url = '/api/v1.1/users/superman/tokens/' + tokenToReq;
-            ApiServer.get(url, reqToken).expect(404, function(err, res) {
-                should.not.exist(err);
-                done();
-            });
+            await ApiServer.get(url, reqToken).expect(404);
         });
 
     });
 
     describe("delete tokens", function() {
         userNames.forEach(function(name) {
-            it(name + " cannot delete a session token via the tokens api", function(done) {
+            it(name + " cannot delete a session token via the tokens api", async function() {
                 // sessions are JWTs and are not stored; logout ends them
                 var session = userToTokens[name][0];
                 var url = "/api/v1.1/users/" + name + "/tokens/" + session.name;
-                ApiServer.del(url, session.name).expect(404, done);
+                await ApiServer.del(url, session.name).expect(404);
             });
             var testName = name + " can delete own persistent tokens";
-            it(testName, function(done) {
+            it(testName, async function() {
                 var session = userToTokens[name][0];
                 var tokens = userToTokens[name].slice(1);
-                async.map(tokens, function(token, callback) {
+                await Promise.all(tokens.map(function(token) {
                     var url = "/api/v1.1/users/" + name + "/tokens/" + token.name;
-                    ApiServer.del(url, session.name)
-                        .expect(200, function(err, res) {
-                        should.not.exist(err);
-                        callback(null);
-                    });
-                }, done);
+                    return ApiServer.del(url, session.name).expect(200);
+                }));
             });
         });
     });
