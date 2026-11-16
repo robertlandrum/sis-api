@@ -4,17 +4,10 @@ var webUtil = require("../routes/webutil");
 var createEntityManager = require("../util/entity-manager");
 var _ = require("lodash");
 
-function GenericEp(hieraManager) {
-    this.get = function(id, query) {
-        query = query || { };
-        var rq = webUtil.parseQuery(query, '1.1', false);
-        var options = { read : "nearest", lean : true };
-        return hieraManager.getById(id, options).then(function(obj) {
-            obj.hieradata = obj.hieradata || { };
-            var result = {};
-            result[id] = obj.hieradata;
-            return result;
-        });
+// get and listAll of the objects of manager
+function GenericEp(manager) {
+    this.get = function(id) {
+        return manager.getById(id, { read : "nearest", lean : true });
     };
 
     this.listAll = function(query) {
@@ -26,7 +19,20 @@ function GenericEp(hieraManager) {
         if (rq.limit) { options.limit = rq.limit; }
         if (rq.offset) { options.skip = rq.offset; }
         options.lean = lean;
-        return hieraManager.getAll(rq.query, options, rq.fields);
+        return manager.getAll(rq.query, options, rq.fields);
+    };
+}
+
+// like GenericEp, but get resolves with { id : hieradata } as the hiera API sends it
+function HieraEp(hieraManager) {
+    GenericEp.call(this, hieraManager);
+    var getEntry = this.get;
+    this.get = function(id) {
+        return getEntry(id).then(function(obj) {
+            var result = {};
+            result[id] = obj.hieradata || { };
+            return result;
+        });
     };
 }
 
@@ -115,7 +121,7 @@ function Client(schemaManager, hieraManager) {
         }
         return epCache[name];
     };
-    this.hiera = new GenericEp(hieraManager);
+    this.hiera = new HieraEp(hieraManager);
     this.schemas = new GenericEp(schemaManager);
 }
 

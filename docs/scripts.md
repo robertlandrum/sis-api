@@ -139,7 +139,7 @@ The `client` object represents a SIS client with an API similar to the one provi
 
  - There are no callbacks in the exposed endpoint methods.  All methods return Promises.
  - Only getters are exposed on the endpoint (`get` and `listAll`).
- - Only entities can be queried.
+ - Only entities, schemas and hiera can be queried: `client.entities(schemaName)`, `client.schemas` and `client.hiera`.  `client.hiera.get(name)` resolves with `{ name : hieradata }`, like `GET /api/v1.1/hiera/:name`.
 
 ## Libraries
 
