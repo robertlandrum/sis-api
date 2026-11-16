@@ -392,17 +392,17 @@ function getValidKeys(condition) {
 
 var OR_AND_NOR = ["$or","$and","$nor"];
 
-// "flatten" a query to deal with all joins
-// returns a promise for the flattened query + mgr
+// "flatten" a query of mgr's objects to deal with all joins
+// returns a promise for the flattened query
 module.exports.flattenCondition = function(condition, schemaManager, mgr) {
     var references = mgr.getReferences();
     if (!condition || typeof condition !== 'object' ||
         !references || !references.length) {
-        return Promise.resolve([condition, mgr]);
+        return Promise.resolve(condition);
     }
     var keys = getValidKeys(condition);
     if (!keys) {
-        return Promise.resolve([condition, mgr]);
+        return Promise.resolve(condition);
     }
     var paths = references.map(function(ref) {
         return ref;
@@ -423,13 +423,7 @@ module.exports.flattenCondition = function(condition, schemaManager, mgr) {
     OR_AND_NOR.forEach(function(key) {
         if (condition[key]) {
             var promise = Promise.all((condition[key]).map(mapInnerCondition))
-                .then(function(flatResults) {
-                    // flatResults is an array of arrays where
-                    // each array is a flattend condition, manager tuple
-                    // so we need to only grab the flattened conditions out
-                    var flatConditions = flatResults.map(function(fr) {
-                        return fr[0];
-                    });
+                .then(function(flatConditions) {
                     return [key, flatConditions];
                 });
             orAndNorPromises.push(promise);
@@ -471,9 +465,9 @@ module.exports.flattenCondition = function(condition, schemaManager, mgr) {
             return getObjectIds(schemaPath, cond, remainingPath,
                                 schemaManager, mgr.model);
         });
-        var resultPromise = Promise.resolve([flattened, mgr]);
+        var resultPromise = Promise.resolve(flattened);
         if (promises.length) {
-            resultPromise = resultPromise.then(P.spread(function(flattened, mgr) {
+            resultPromise = resultPromise.then(function(flattened) {
                 return Promise.all(promises).then(function(results) {
                     var refConds = {};
                     for (var i = 0; i < results.length; ++i) {
@@ -490,24 +484,24 @@ module.exports.flattenCondition = function(condition, schemaManager, mgr) {
                             flattened[k] = v;
                         }
                     }
-                    return Promise.resolve([flattened, mgr]);
+                    return flattened;
                 });
-            }));
+            });
         }
         if (orAndNorPromises.length) {
-            resultPromise = resultPromise.then(P.spread(function(flattened, mgr) {
+            resultPromise = resultPromise.then(function(flattened) {
                 return Promise.all(orAndNorPromises).then(function(results) {
                     results.forEach(function(res) {
                         // res is tuple of key => flattened conditions
                         flattened[res[0]] = res[1];
                     });
-                    return Promise.resolve([flattened, mgr]);
+                    return flattened;
                 });
-            }));
+            });
         }
         return resultPromise;
     } else {
-        return Promise.resolve([condition, mgr]);
+        return Promise.resolve(condition);
     }
 };
 

@@ -1,7 +1,7 @@
 "use strict";
 
 // Small native-promise helpers replacing the bluebird-specific sugar
-// (.pending / .spread / .tap / .nodeify) that SIS relied on.
+// (.pending / .tap / .nodeify) that SIS relied on.
 
 // A deferred: { promise, resolve, reject }  (was BPromise.pending()).
 exports.defer = function() {
@@ -20,12 +20,6 @@ exports.nodeify = function(promise, cb) {
     }
     promise.then(function(r) { cb(null, r); }, function(e) { cb(e); });
     return promise;
-};
-
-// Spread an array result across positional args (was .spread(fn)).
-// Use as: promise.then(spread(function(a, b) { ... }))
-exports.spread = function(fn) {
-    return function(arr) { return fn.apply(this, arr); };
 };
 
 // Run a side effect, then pass the original value through (was .tap(fn)).

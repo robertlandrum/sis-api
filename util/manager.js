@@ -111,7 +111,7 @@ Manager.prototype.getAll = async function(condition, options, fields) {
 };
 
 // Count the number of objects specified by the query
-// Resolves with [count, condition, manager] - a failed count is 0.
+// Resolves with the count - a failed count is 0.
 Manager.prototype.count = async function(condition) {
     var count = 0;
     try {
@@ -119,7 +119,7 @@ Manager.prototype.count = async function(condition) {
     } catch (err) {
         count = 0;
     }
-    return [count, condition, this];
+    return count;
 };
 
 // Resolves with the space separated paths to populate, or null if there

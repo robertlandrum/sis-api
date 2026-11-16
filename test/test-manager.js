@@ -143,27 +143,17 @@ describe('Manager', function() {
                 .should.eql({ skip : 1, limit : 2, sort : 3, lean : 4, populate : 5, read : 6 });
         });
 
-        it("counts as [count, condition, manager]", async function() {
-            var condition = { num : { $gt : 1 } };
-            var result = await mgr.count(condition);
-            result.length.should.eql(3);
-            result[0].should.eql(1);
-            result[1].should.equal(condition);
-            result[2].should.equal(mgr);
+        it("counts the objects matching the condition", async function() {
+            (await mgr.count({ num : { $gt : 1 } })).should.eql(1);
         });
 
         it("counts everything for an empty condition", async function() {
-            var result = await mgr.count({});
-            result[0].should.eql(2);
+            (await mgr.count({})).should.eql(2);
         });
 
         it("counts 0 when the count fails", async function() {
             var broken = withModel({ countDocuments : rejectingQuery(new Error("db down")) }, { auth : false });
-            var condition = { num : 1 };
-            var result = await broken.count(condition);
-            result[0].should.eql(0);
-            result[1].should.equal(condition);
-            result[2].should.equal(broken);
+            (await broken.count({ num : 1 })).should.eql(0);
         });
     });
 

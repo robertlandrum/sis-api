@@ -203,28 +203,27 @@ ApiController.prototype.getAll = function(req, res) {
     var fields = rq.fields;
     var condition = rq.query;
     var p = self.getManager(req).then(function(mgr) {
-        return webUtil.flattenCondition(condition,self.sm,mgr);
-    }).then(P.spread(function(flattenedCondition, mgr) {
-        return mgr.count(flattenedCondition);
-    })).then(P.spread(function(c, flattenedCondition, mgr) {
-        c = c || 0;
-        res.setHeader(SIS.HEADER_TOTAL_COUNT, c);
-        if (!c || c < options.offset) {
-            return Promise.resolve([]);
-        }
-        options.lean = req.useLean;
-        var populate = self.parsePopulate(req);
-        if (populate) {
-            return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
-                if (populateFields) {
-                    options.populate = populateFields;
+        return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+            return mgr.count(flattenedCondition).then(function(c) {
+                res.setHeader(SIS.HEADER_TOTAL_COUNT, c);
+                if (!c || c <= options.skip) {
+                    return [];
                 }
-                return mgr.getAll(flattenedCondition, options, fields);
+                options.lean = req.useLean;
+                var populate = self.parsePopulate(req);
+                if (populate) {
+                    return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
+                        if (populateFields) {
+                            options.populate = populateFields;
+                        }
+                        return mgr.getAll(flattenedCondition, options, fields);
+                    });
+                } else {
+                    return mgr.getAll(flattenedCondition, options, fields);
+                }
             });
-        } else {
-            return mgr.getAll(flattenedCondition, options, fields);
-        }
-    }));
+        });
+    });
     self._finish(req, res, p, 200);
 };
 
@@ -274,11 +273,11 @@ ApiController.prototype.delete = function(req, res) {
             return;
         }
         p = self.getManager(req).then(function(mgr) {
-            return webUtil.flattenCondition(condition,self.sm,mgr);
-        }).then(P.spread(function(flattenedCondition, mgr) {
-            // delegate to mgr
-            return mgr.bulkDelete(flattenedCondition, options);
-        }));
+            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+                // delegate to mgr
+                return mgr.bulkDelete(flattenedCondition, options);
+            });
+        });
         self._finish(req, res, p, 200);
     }
 };
@@ -311,10 +310,10 @@ ApiController.prototype.bulkUpdate = function(req, res) {
             return self.sendError(res, SIS.ERR_BAD_REQ("Body should not be empty"));
         }
         p = self.getManager(req).then(function(mgr) {
-            return webUtil.flattenCondition(condition,self.sm, mgr);
-        }).then(P.spread(function(flattenedCondition, mgr) {
-            return mgr.bulkUpdateQuery(flattenedCondition, obj, options);
-        }));
+            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+                return mgr.bulkUpdateQuery(flattenedCondition, obj, options);
+            });
+        });
     }
     return self._finish(req, res, p, 200);
 };
