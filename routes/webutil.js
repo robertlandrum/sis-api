@@ -4,7 +4,6 @@ var passport = require('passport');
 var BasicStrategy = require('passport-http').BasicStrategy;
 var SIS = require("../util/constants");
 var P = require("../util/promises");
-var util = require("util");
 var _ = require("lodash");
 var isJwt = require("../util/session-manager").isJwt;
 
@@ -183,30 +182,29 @@ module.exports.createUserPassStrategy = function(sm, config) {
 };
 
 // The passport strategy for authenticating x-auth-token / Bearer tokens
-function SisTokenStrategy(sm, sessionManager) {
-    this._verify = _verifySisToken.bind(null, sm, sessionManager);
-    passport.Strategy.call(this);
-    this.name = SIS.SCHEMA_TOKENS;
-}
-
-util.inherits(SisTokenStrategy, passport.Strategy);
-
-SisTokenStrategy.prototype.authenticate = function(req) {
-    var extracted = extractToken(req);
-    if (extracted.error) { return this.error(extracted.error); }
-
-    var self = this;
-    function verified(err, user) {
-        if (err) {
-            return self.error(err);
-        } else if (!user) {
-            return self.error(SIS.ERR_BAD_CREDS("No user for the token exists."));
-        }
-        self.success(user);
+class SisTokenStrategy extends passport.Strategy {
+    constructor(sm, sessionManager) {
+        super();
+        this._verify = _verifySisToken.bind(null, sm, sessionManager);
+        this.name = SIS.SCHEMA_TOKENS;
     }
 
-    this._verify(extracted.token, verified);
-};
+    authenticate(req) {
+        var extracted = extractToken(req);
+        if (extracted.error) { return this.error(extracted.error); }
+
+        var verified = (err, user) => {
+            if (err) {
+                return this.error(err);
+            } else if (!user) {
+                return this.error(SIS.ERR_BAD_CREDS("No user for the token exists."));
+            }
+            this.success(user);
+        };
+
+        this._verify(extracted.token, verified);
+    }
+}
 
 module.exports.createTokenStrategy = function(sm, sessionManager) {
     return new SisTokenStrategy(sm, sessionManager);

@@ -6,92 +6,6 @@ var webUtil = require("./webutil");
 var nconf = require("nconf");
 var _ = require("lodash");
 
-// Constructor for the ApiController base
-// The controller base attaches to an express app and
-// has the code for CRUD ops.  It delegates the ops
-// to a manager and handles the authorization aspects here.
-//
-// opts is a dictionary w/ the following keys
-// - schema_manager - the schema manager across the system
-// - auth - boolean (default true) indicating if auth is enabled
-// - auth_reads - boolean (default false) indicating if GET requests
-//       also require a valid token
-// - type - optional string indicating the type for hooks/commits
-// - log_commits - boolean indicating if this controller should
-//       log creates/update/deletions
-// - fire_hooks - boolean indicating if web hooks should be fired
-function ApiController(opts) {
-    this.sm = opts[SIS.OPT_SCHEMA_MGR];
-    this.auth = SIS.OPT_USE_AUTH in opts ? opts[SIS.OPT_USE_AUTH] : SIS.DEFAULT_OPT_USE_AUTH;
-    this.authReads = SIS.OPT_AUTH_READS in opts ? !!opts[SIS.OPT_AUTH_READS] : SIS.DEFAULT_OPT_AUTH_READS;
-    opts = opts || { };
-    if (opts[SIS.OPT_TYPE]) {
-        this.type = opts[SIS.OPT_TYPE];
-    }
-    if (opts[SIS.OPT_LOG_COMMTS]) {
-        this.commitManager = require("../util/commit-manager")(this.sm);
-        if (opts[SIS.OPT_ID_FIELD]) {
-            this.commitManager.idField = opts[SIS.OPT_ID_FIELD];
-        }
-    }
-    if (opts[SIS.OPT_FIRE_HOOKS]) {
-        this.hm = require('../util/hook-manager')(this.sm);
-    }
-    this.getterReadPref = nconf.get("app:get_read_pref");
-}
-
-// overrides
-// Returns a promise that returns a Manager instance.
-// Subclasses can assign a manager to the 'manager' property.
-ApiController.prototype.getManager = function(req) {
-    if (this.manager) {
-        req.useLean = true;
-        return Promise.resolve(this.manager);
-    } else {
-        return Promise.reject(SIS.ERR_INTERNAL("Error fetching object"));
-    }
-};
-
-// Get the type of object from the request
-ApiController.prototype.getType = function(req) {
-    return this.type || "invalid" ;
-};
-
-// Convert the object to an object suitable for the response.
-// Default does nothing, but subclasses may override to
-// remove fields from objects or translate it.
-// obj may be an individual object or an array of objects
-ApiController.prototype.convertToResponseObject = function(req, obj) {
-    // default does nothing
-    // hiera needs to return a sub field
-    return obj;
-};
-
-// Apply default parameters to a request
-ApiController.prototype.applyDefaults = function(req) {
-    // noop
-};
-
-ApiController.prototype.shouldSaveCommit = function(req) {
-    return (this.commitManager && req.method in SIS.METHODS_TO_EVENT);
-};
-
-// Utils - not normal to override these
-
-// Send an error via the response object
-// The err is usually an object returned via
-// SIS.ERR_* functions/properties
-ApiController.prototype.sendError = function(res, err) {
-    if (!(err instanceof Array) || err.length < 2) {
-        if (res.log) {
-            res.log.error(err);
-        }
-        // never send a raw error: it can hold internals such as a stack trace
-        err = SIS.ERR_INTERNAL(err) || SIS.ERR_INTERNAL("unknown error");
-    }
-    res.status(err[0]).send(err[1]);
-};
-
 var CHUNK_SIZE = 100;
 
 function writeJSONArrayChunk(res, array, cStart, cSize, defer) {
@@ -136,533 +50,619 @@ function writeJSONArray(res, array) {
     return d.promise;
 }
 
-// Send a response with the specified code and data
-ApiController.prototype.sendObject = function(res, code, obj, isBulk) {
-    res.setHeader("Content-Type","application/json");
-    res.status(code);
-    if (isBulk) {
-        res.setHeader("X-Accel-Buffering","no");
-        res.write('{"success":');
-        writeJSONArray(res, obj.success).then(function(res) {
-            res.write(',"errors":');
-            return writeJSONArray(res, obj.errors);
-        }).then(function(res) {
-            res.write("}");
-            res.end();
-        });
-    } else if (Array.isArray(obj)) {
-        if (obj.length < CHUNK_SIZE) {
-            // just send
-            res.send(obj);
+// The controller base attaches to an express app and
+// has the code for CRUD ops.  It delegates the ops
+// to a manager and handles the authorization aspects here.
+class ApiController {
+    // opts is a dictionary w/ the following keys
+    // - schema_manager - the schema manager across the system
+    // - auth - boolean (default true) indicating if auth is enabled
+    // - auth_reads - boolean (default false) indicating if GET requests
+    //       also require a valid token
+    // - type - optional string indicating the type for hooks/commits
+    // - log_commits - boolean indicating if this controller should
+    //       log creates/update/deletions
+    // - fire_hooks - boolean indicating if web hooks should be fired
+    constructor(opts) {
+        this.sm = opts[SIS.OPT_SCHEMA_MGR];
+        this.auth = SIS.OPT_USE_AUTH in opts ? opts[SIS.OPT_USE_AUTH] : SIS.DEFAULT_OPT_USE_AUTH;
+        this.authReads = SIS.OPT_AUTH_READS in opts ? !!opts[SIS.OPT_AUTH_READS] : SIS.DEFAULT_OPT_AUTH_READS;
+        opts = opts || { };
+        if (opts[SIS.OPT_TYPE]) {
+            this.type = opts[SIS.OPT_TYPE];
+        }
+        if (opts[SIS.OPT_LOG_COMMTS]) {
+            this.commitManager = require("../util/commit-manager")(this.sm);
+            if (opts[SIS.OPT_ID_FIELD]) {
+                this.commitManager.idField = opts[SIS.OPT_ID_FIELD];
+            }
+        }
+        if (opts[SIS.OPT_FIRE_HOOKS]) {
+            this.hm = require('../util/hook-manager')(this.sm);
+        }
+        this.getterReadPref = nconf.get("app:get_read_pref");
+    }
+
+    // overrides
+    // Returns a promise that returns a Manager instance.
+    // Subclasses can assign a manager to the 'manager' property.
+    getManager(req) {
+        if (this.manager) {
+            req.useLean = true;
+            return Promise.resolve(this.manager);
         } else {
-            res.setHeader("X-Accel-Buffering","no");
-            writeJSONArray(res, obj).then(function(res) {
-                res.end();
-            });
-        }
-    } else {
-        res.send(obj);
-    }
-};
-
-// Parse the query parameters for a given req
-// Converts the q param to an object and assigns a
-// limit and offset
-ApiController.prototype.parseQuery = function(req) {
-    return webUtil.parseQuery(req.query, req.params.version, true);
-};
-
-ApiController.prototype.parseUpsert = function(req) {
-    if (typeof req.query.upsert == 'string') {
-        return req.query.upsert == 'true';
-    } else {
-        return req.query.upsert || false;
-    }
-};
-
-// Returns true if the request wants sub-documents populated
-ApiController.prototype.parsePopulate = function(req) {
-    return webUtil.parsePopulate(req.query);
-};
-
-// Handler for the getAll request (typically GET controller_base/)
-ApiController.prototype.getAll = function(req, res) {
-    var self = this;
-    self.applyDefaults(req);
-    var rq = self.parseQuery(req);
-    if (rq.query === webUtil.ERROR_QUERY) {
-        self.sendError(res, SIS.ERR_BAD_REQ("Query parameter is invalid.  Must be JSON"));
-        return;
-    }
-    var options = self._getReqOptions(req);
-    options.skip = rq.offset;
-    options.limit = rq.limit;
-    if (rq.sort) {
-        options.sort = rq.sort;
-    }
-    var fields = rq.fields;
-    var condition = rq.query;
-    var p = self.getManager(req).then(function(mgr) {
-        return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
-            return mgr.count(flattenedCondition).then(function(c) {
-                res.setHeader(SIS.HEADER_TOTAL_COUNT, c);
-                if (!c || c <= options.skip) {
-                    return [];
-                }
-                options.lean = req.useLean;
-                var populate = self.parsePopulate(req);
-                if (populate) {
-                    return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
-                        if (populateFields) {
-                            options.populate = populateFields;
-                        }
-                        return mgr.getAll(flattenedCondition, options, fields);
-                    });
-                } else {
-                    return mgr.getAll(flattenedCondition, options, fields);
-                }
-            });
-        });
-    });
-    self._finish(req, res, p, 200);
-};
-
-// Handler for the get request (typically GET controller_base/:id)
-ApiController.prototype.get = function(req, res) {
-    var self = this;
-    self.applyDefaults(req);
-    var id = req.params.id;
-    var p = self.getManager(req).then(function(mgr) {
-        var options = self._getReqOptions(req);
-        options.lean = req.useLean;
-        var populate = self.parsePopulate(req);
-        if (populate) {
-            return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
-                if (populateFields) {
-                    options.populate = populateFields;
-                }
-                return mgr.getById(id, options);
-            });
-        } else {
-            return mgr.getById(id, options);
-        }
-    });
-
-    self._finish(req, res, p, 200);
-};
-
-// Handler for the delete request (typically DELETE controller_base/:id)
-ApiController.prototype.delete = function(req, res) {
-    var self = this;
-    self.applyDefaults(req);
-    var id = req.params.id;
-    var p = null;
-    var options = self._getReqOptions(req);
-    if (id) {
-        p = self.getManager(req).then(function(mgr) {
-            return mgr.delete(id, options);
-        });
-        self._finish(req, res, p, 200);
-    } else {
-        // bulk delete - query is required
-        req.params.isBulk = true;
-        var rq = self.parseQuery(req);
-        var condition = rq.query;
-        if (!condition || !Object.keys(condition).length) {
-            self.sendError(res, SIS.ERR_BAD_REQ("Bulk delete requires a non empty query."));
-            return;
-        }
-        p = self.getManager(req).then(function(mgr) {
-            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
-                // delegate to mgr
-                return mgr.bulkDelete(flattenedCondition, options);
-            });
-        });
-        self._finish(req, res, p, 200);
-    }
-};
-
-ApiController.prototype.bulkUpdate = function(req, res) {
-    var self = this;
-    // either an array of objects or a query with an object to set
-    var obj = req.body;
-    var options = self._getReqOptions(req);
-    var p = null;
-    req.params.isBulk = true;
-    if (Array.isArray(obj)) {
-        if (!obj.length) {
-            return self.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
-        }
-        // array of individual objects
-        p = self.getManager(req).then(function(mgr) {
-            return mgr.bulkUpdateArray(obj, options);
-        });
-    } else {
-        if (typeof obj !== "object") {
-            return self.sendError(res, SIS.ERR_BAD_REQ("Bulk update requires array or object as body"));
-        }
-        var rq = self.parseQuery(req);
-        var condition = rq.query;
-        if (!condition || !Object.keys(condition).length) {
-            return self.sendError(res, SIS.ERR_BAD_REQ("A valid query is required"));
-        }
-        if (!Object.keys(obj).length) {
-            return self.sendError(res, SIS.ERR_BAD_REQ("Body should not be empty"));
-        }
-        p = self.getManager(req).then(function(mgr) {
-            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
-                return mgr.bulkUpdateQuery(flattenedCondition, obj, options);
-            });
-        });
-    }
-    return self._finish(req, res, p, 200);
-};
-
-// Handler for the update request (typically PUT controller_base:/id)
-ApiController.prototype.update = function(req, res) {
-    var self = this;
-    self.applyDefaults(req);
-    var id = req.params.id;
-    var obj = req.body;
-    var upsert = self.parseUpsert(req);
-    var p = null;
-    var options = self._getReqOptions(req);
-    var cas;
-    options.forceMixed = req.query.forceMixed;
-    if ('cas' in req.query) {
-        cas = req.query.cas;
-        try {
-            if (typeof cas === 'string') {
-                cas = JSON.parse(cas);
-            }
-        } catch (ex) {
-            cas = { };
-        }
-        if (typeof cas !== 'object' ||
-            cas instanceof Array ||
-            !Object.keys(cas).length) {
-            // invalid query
-            return self.sendError(res, SIS.ERR_BAD_REQ("CAS condition must be an object."));
-        }
-        options.cas = cas;
-    }
-    if (upsert) {
-        p = self.getManager(req).then(function(mgr) {
-            return mgr.upsert(id, obj, options);
-        });
-    } else {
-        p = self.getManager(req).then(function(mgr) {
-            return mgr.update(id, obj, options);
-        });
-    }
-    self._finish(req, res, p, 200);
-};
-
-// Handler for the add request (typically POST controller_base:/)
-ApiController.prototype.add = function(req, res) {
-    var self = this;
-    self.applyDefaults(req);
-    var body = req.body;
-    if (body instanceof Array) {
-        req.params.isBulk = true;
-        if (typeof req.query.all_or_none == 'undefined') {
-            req.query.all_or_none = false;
-        } else {
-            req.query.all_or_none = req.query.all_or_none == "true";
-        }
-        if (!body.length) {
-            return self.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
+            return Promise.reject(SIS.ERR_INTERNAL("Error fetching object"));
         }
     }
-    var p = self.getManager(req);
-    var options = self._getReqOptions(req);
-    if (req.params.isBulk) {
-        options.allOrNone = req.query.all_or_none;
-        p = p.then(function(mgr) {
-            return mgr.bulkAdd(body, options);
-        });
-        self._finish(req, res, p, 200);
-    } else {
-        p = p.then(function(mgr) {
-            return mgr.add(body, options);
-        });
-        self._finish(req, res, p, 201);
+
+    // Get the type of object from the request
+    getType(req) {
+        return this.type || "invalid" ;
     }
-};
 
-// Attach the controller to the app at a particular base
-ApiController.prototype.attach = function(app, prefix) {
-    // prepend prefix w/ /api/version str.  Express 5 (path-to-regexp v8) no
-    // longer supports inline regex in the path, so the version is validated by
-    // an app.param('version', ...) guard registered in server.js.
-    prefix = "/api/:version" + prefix;
-    this.apiPrefix = prefix;
-    app.get(prefix, this._wrapReadAuth(this.getAll));
-    app.get(prefix + "/:id", this._wrapReadAuth(this.get));
-    if (!app.get(SIS.OPT_READONLY)) {
-        // wrap authorization around modification calls
-        app.put(prefix + "/:id", this._wrapAuth(this.update));
-        app.put(prefix, this._wrapAuth(this.bulkUpdate));
-        app.post(prefix, this._wrapAuth(this.add));
-        // Express 5 dropped optional params (/:id?) - register both forms.
-        // The delete handler bulk-deletes when no id is present.
-        app.delete(prefix + "/:id", this._wrapAuth(this.delete));
-        app.delete(prefix, this._wrapAuth(this.delete));
-        // enable the commit api if we have a commitManager
-        if (this.commitManager) {
-            this._enableCommitApi(app, prefix);
-        }
-    }
-};
-
-// Returns a promise that authenticates a request
-// The type specifies which kind of authentication to use
-// and should have already been registered with passport
-ApiController.prototype.authenticate = function(req, res, type) {
-    return webUtil.authenticate(req, res, type);
-};
-
-// "private"
-// Wrap a controller func with authorization
-// The returned function is a request handler
-// bound to the controller.
-ApiController.prototype._wrapAuth = function(func) {
-    return function(req, res) {
-        if (!this.auth) {
-            return func.call(this, req, res);
-        }
-        var p = this.authenticate(req, res, SIS.SCHEMA_TOKENS);
-        var self = this;
-        p.then(function(auth) {
-            func.call(self, req, res);
-        })
-        .catch(function(err) {
-            return self.sendError(res, err);
-        });
-    }.bind(this);
-};
-
-// Wrap a read (GET) handler.  Reads only require a token when
-// auth_reads is enabled.
-ApiController.prototype._wrapReadAuth = function(func) {
-    if (this.authReads) {
-        return this._wrapAuth(func);
-    }
-    return func.bind(this);
-};
-
-// Enable the commit API endpoints
-ApiController.prototype._enableCommitApi = function(app, prefix) {
-    // all history
-    var self = this;
-    app.get(prefix + "/:id/commits", this._wrapReadAuth(function(req, res) {
-        req.params.isCommitApi = true;
-        var type = this.getType(req);
-        var id = req.params.id;
-        var rq = this.parseQuery(req);
-        var mongooseModel = this.commitManager.model;
-
-        // update the query for the right types
-        rq.query.entity_id = id;
-        rq.query.type = type;
-
-        Promise.resolve(mongooseModel.countDocuments(rq.query).exec()).then(function(c) {
-            if (!c) {
-                res.setHeader("x-total-count", 0);
-                return self.sendObject(res, 200, []);
-            }
-            var opts = { skip : rq.offset, limit: rq.limit};
-            var mgQuery = mongooseModel.find(rq.query, rq.fields, opts).sort({date_modified: -1});
-            return Promise.resolve(mgQuery.exec()).then(function(entities) {
-                res.setHeader("x-total-count", c);
-                self.sendObject(res, 200, entities);
-            });
-        }).catch(function(err) {
-            res.setHeader("x-total-count", 0);
-            self.sendObject(res, 200, []);
-        });
-    }));
-
-    // specific entry by history id
-    app.get(prefix + "/:id/commits/:hid", this._wrapReadAuth(function(req, res) {
-        var type = this.getType(req);
-        var id = req.params.id;
-        var hid = req.params.hid;
-        req.params.isCommitApi = true;
-        this.commitManager.getVersionById(type, id, hid).then(function(result) {
-            if (!result) {
-                return self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
-            }
-            result.value_at = self.convertToResponseObject(req, result.value_at);
-            self.sendObject(res, 200, result);
-        }, function(err) {
-            self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
-        });
-    }));
-
-    app.get(prefix + "/:id/revision/:utc", this._wrapReadAuth(function(req, res) {
-        var type = this.getType(req);
-        var id = req.params.id;
-        var utc = req.params.utc;
-        req.params.isCommitApi = true;
-        this.commitManager.getVersionByUtc(type, id, utc).then(function(result) {
-            if (!result) {
-                return self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
-            }
-            self.sendObject(res, 200, self.convertToResponseObject(req, result));
-        }, function(err) {
-            self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
-        });
-
-    }));
-};
-
-ApiController.prototype._convertToResponseObject = function(req, obj) {
-    var self = this;
-    if (req.params.isBulk) {
-        // change the success array
-        obj.success = obj.success.map(function(o) {
-            if (req.method == SIS.METHOD_PUT) {
-                // get the update value
-                o = o.updated;
-            }
-            o = self.convertToResponseObject(req, o);
-            return o;
-        });
+    // Convert the object to an object suitable for the response.
+    // Default does nothing, but subclasses may override to
+    // remove fields from objects or translate it.
+    // obj may be an individual object or an array of objects
+    convertToResponseObject(req, obj) {
+        // default does nothing
+        // hiera needs to return a sub field
         return obj;
     }
-    if (obj instanceof Array) {
-        obj = obj.map(function(o) {
-            o = self.convertToResponseObject(req, o);
-            return o;
-        });
-    } else {
-        obj = self.convertToResponseObject(req, obj);
+
+    // Apply default parameters to a request
+    applyDefaults(req) {
+        // noop
     }
-    return obj;
-};
 
-// Get the callback that will send the result from the controller
-ApiController.prototype._getSendCallback = function(req, res, code) {
-    var self = this;
-    return function(err, result) {
-        if (err) { return self.sendError(res, err); }
-        // hooks get the object - and the old one for an update
-        var toSend = result;
-        var hookEvt = SIS.METHODS_TO_EVENT[req.method];
-        if (!req.params.isBulk &&
-            req.method == SIS.METHOD_PUT && req.params.id) {
-            if (!result.old) {
-                // an upsert that added the object - it was created
-                code = 201;
-                hookEvt = SIS.EVENT_INSERT;
-                toSend = result.updated;
-            }
-            result = result.updated;
-        }
-        result = self._convertToResponseObject(req, result);
-        self.sendObject(res, code, result, req.params.isBulk);
-        // dispatch hooks
-        var hookType = self.getType(req);
-        if (self.hm && req.method in SIS.METHODS_TO_EVENT) {
-            if (req.params.isBulk) {
-                // the objects as sent in the response
-                toSend = result.success;
-            }
-            self.hm.dispatchHooks(toSend, hookType, hookEvt, req.params.isBulk);
-        }
-    };
-};
-
-ApiController.prototype._saveSingleCommit = function(req, result) {
-    var old = null;
-    var now = null;
-    switch (req.method) {
-        case SIS.METHOD_PUT:
-            // an update - old is null if an upsert added the object
-            old = result.old;
-            now = result.updated;
-            break;
-        case SIS.METHOD_POST:
-            // add
-            now = result;
-            break;
-        case SIS.METHOD_DELETE:
-            old = result;
-            break;
-        default:
-            return Promise.reject(SIS.ERR_INTERNAL("invalid commit being saved"));
+    shouldSaveCommit(req) {
+        return (this.commitManager && req.method in SIS.METHODS_TO_EVENT);
     }
-    // a commit that fails to save doesn't fail the request (for now)
-    var done = function() { return result; };
-    return this.commitManager.recordHistory(old, now, req.user, this.getType(req)).then(done, done);
-};
 
-ApiController.prototype._saveBulkCommits = function(req, items) {
-    // save it
-    var action = SIS.METHODS_TO_EVENT[req.method];
-    var type = this.getType(req);
-    return this.commitManager.recordHistoryBulk(items, req.user, action, type)
-    .then(function() {
-        return items;
-    });
-};
+    // Utils - not normal to override these
 
-// Save a commit to the commit log
-ApiController.prototype._saveCommit = function(req) {
-    // need to return a promise that saves history
-    // but returns the initial object passed to it
-    return function(result) {
-        if (!this.shouldSaveCommit(req)) {
-            return Promise.resolve(result);
+    // Send an error via the response object
+    // The err is usually an object returned via
+    // SIS.ERR_* functions/properties
+    sendError(res, err) {
+        if (!(err instanceof Array) || err.length < 2) {
+            if (res.log) {
+                res.log.error(err);
+            }
+            // never send a raw error: it can hold internals such as a stack trace
+            err = SIS.ERR_INTERNAL(err) || SIS.ERR_INTERNAL("unknown error");
         }
+        res.status(err[0]).send(err[1]);
+    }
 
-        if (req.params.isBulk) {
-            var items = result.success;
-            if (items.length) {
-                return this._saveBulkCommits(req, items)
-                .then(function() {
-                    return result;
-                }).catch(function() {
-                    return result;
-                });
+    // Send a response with the specified code and data
+    sendObject(res, code, obj, isBulk) {
+        res.setHeader("Content-Type","application/json");
+        res.status(code);
+        if (isBulk) {
+            res.setHeader("X-Accel-Buffering","no");
+            res.write('{"success":');
+            writeJSONArray(res, obj.success).then(function(res) {
+                res.write(',"errors":');
+                return writeJSONArray(res, obj.errors);
+            }).then(function(res) {
+                res.write("}");
+                res.end();
+            });
+        } else if (Array.isArray(obj)) {
+            if (obj.length < CHUNK_SIZE) {
+                // just send
+                res.send(obj);
             } else {
-                return Promise.resolve(result);
+                res.setHeader("X-Accel-Buffering","no");
+                writeJSONArray(res, obj).then(function(res) {
+                    res.end();
+                });
             }
         } else {
-            return this._saveSingleCommit(req, result);
+            res.send(obj);
         }
-    }.bind(this);
-};
-
-// Do the final steps of the request
-// p is the promise that receives the object from the
-// request handler
-ApiController.prototype._finish = function(req, res, p, code) {
-    p = p.then(P.tap(this._saveCommit(req)));
-    var cb = this._getSendCallback(req, res, code);
-    p.then(function(result) {
-        cb(null, result);
-    })
-    .catch(function(err) {
-        cb(err);
-    });
-};
-
-// get request options to pass to managers per request
-ApiController.prototype._getReqOptions = function(req) {
-    var result = {
-        user : req.user,
-        version : req.params.version,
-        log : req.log,
-        params : req.params,
-        query : req.query
-    };
-    if (req.method === "GET" && this.getterReadPref) {
-        result.read = this.getterReadPref;
     }
-    return result;
-};
+
+    // Parse the query parameters for a given req
+    // Converts the q param to an object and assigns a
+    // limit and offset
+    parseQuery(req) {
+        return webUtil.parseQuery(req.query, req.params.version, true);
+    }
+
+    parseUpsert(req) {
+        if (typeof req.query.upsert == 'string') {
+            return req.query.upsert == 'true';
+        } else {
+            return req.query.upsert || false;
+        }
+    }
+
+    // Returns true if the request wants sub-documents populated
+    parsePopulate(req) {
+        return webUtil.parsePopulate(req.query);
+    }
+
+    // Handler for the getAll request (typically GET controller_base/)
+    getAll(req, res) {
+        var self = this;
+        self.applyDefaults(req);
+        var rq = self.parseQuery(req);
+        if (rq.query === webUtil.ERROR_QUERY) {
+            self.sendError(res, SIS.ERR_BAD_REQ("Query parameter is invalid.  Must be JSON"));
+            return;
+        }
+        var options = self._getReqOptions(req);
+        options.skip = rq.offset;
+        options.limit = rq.limit;
+        if (rq.sort) {
+            options.sort = rq.sort;
+        }
+        var fields = rq.fields;
+        var condition = rq.query;
+        var p = self.getManager(req).then(function(mgr) {
+            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+                return mgr.count(flattenedCondition).then(function(c) {
+                    res.setHeader(SIS.HEADER_TOTAL_COUNT, c);
+                    if (!c || c <= options.skip) {
+                        return [];
+                    }
+                    options.lean = req.useLean;
+                    var populate = self.parsePopulate(req);
+                    if (populate) {
+                        return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
+                            if (populateFields) {
+                                options.populate = populateFields;
+                            }
+                            return mgr.getAll(flattenedCondition, options, fields);
+                        });
+                    } else {
+                        return mgr.getAll(flattenedCondition, options, fields);
+                    }
+                });
+            });
+        });
+        self._finish(req, res, p, 200);
+    }
+
+    // Handler for the get request (typically GET controller_base/:id)
+    get(req, res) {
+        var self = this;
+        self.applyDefaults(req);
+        var id = req.params.id;
+        var p = self.getManager(req).then(function(mgr) {
+            var options = self._getReqOptions(req);
+            options.lean = req.useLean;
+            var populate = self.parsePopulate(req);
+            if (populate) {
+                return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
+                    if (populateFields) {
+                        options.populate = populateFields;
+                    }
+                    return mgr.getById(id, options);
+                });
+            } else {
+                return mgr.getById(id, options);
+            }
+        });
+
+        self._finish(req, res, p, 200);
+    }
+
+    // Handler for the delete request (typically DELETE controller_base/:id)
+    delete(req, res) {
+        var self = this;
+        self.applyDefaults(req);
+        var id = req.params.id;
+        var p = null;
+        var options = self._getReqOptions(req);
+        if (id) {
+            p = self.getManager(req).then(function(mgr) {
+                return mgr.delete(id, options);
+            });
+            self._finish(req, res, p, 200);
+        } else {
+            // bulk delete - query is required
+            req.params.isBulk = true;
+            var rq = self.parseQuery(req);
+            var condition = rq.query;
+            if (!condition || !Object.keys(condition).length) {
+                self.sendError(res, SIS.ERR_BAD_REQ("Bulk delete requires a non empty query."));
+                return;
+            }
+            p = self.getManager(req).then(function(mgr) {
+                return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+                    // delegate to mgr
+                    return mgr.bulkDelete(flattenedCondition, options);
+                });
+            });
+            self._finish(req, res, p, 200);
+        }
+    }
+
+    bulkUpdate(req, res) {
+        var self = this;
+        // either an array of objects or a query with an object to set
+        var obj = req.body;
+        var options = self._getReqOptions(req);
+        var p = null;
+        req.params.isBulk = true;
+        if (Array.isArray(obj)) {
+            if (!obj.length) {
+                return self.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
+            }
+            // array of individual objects
+            p = self.getManager(req).then(function(mgr) {
+                return mgr.bulkUpdateArray(obj, options);
+            });
+        } else {
+            if (typeof obj !== "object") {
+                return self.sendError(res, SIS.ERR_BAD_REQ("Bulk update requires array or object as body"));
+            }
+            var rq = self.parseQuery(req);
+            var condition = rq.query;
+            if (!condition || !Object.keys(condition).length) {
+                return self.sendError(res, SIS.ERR_BAD_REQ("A valid query is required"));
+            }
+            if (!Object.keys(obj).length) {
+                return self.sendError(res, SIS.ERR_BAD_REQ("Body should not be empty"));
+            }
+            p = self.getManager(req).then(function(mgr) {
+                return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+                    return mgr.bulkUpdateQuery(flattenedCondition, obj, options);
+                });
+            });
+        }
+        return self._finish(req, res, p, 200);
+    }
+
+    // Handler for the update request (typically PUT controller_base:/id)
+    update(req, res) {
+        var self = this;
+        self.applyDefaults(req);
+        var id = req.params.id;
+        var obj = req.body;
+        var upsert = self.parseUpsert(req);
+        var p = null;
+        var options = self._getReqOptions(req);
+        var cas;
+        options.forceMixed = req.query.forceMixed;
+        if ('cas' in req.query) {
+            cas = req.query.cas;
+            try {
+                if (typeof cas === 'string') {
+                    cas = JSON.parse(cas);
+                }
+            } catch (ex) {
+                cas = { };
+            }
+            if (typeof cas !== 'object' ||
+                cas instanceof Array ||
+                !Object.keys(cas).length) {
+                // invalid query
+                return self.sendError(res, SIS.ERR_BAD_REQ("CAS condition must be an object."));
+            }
+            options.cas = cas;
+        }
+        if (upsert) {
+            p = self.getManager(req).then(function(mgr) {
+                return mgr.upsert(id, obj, options);
+            });
+        } else {
+            p = self.getManager(req).then(function(mgr) {
+                return mgr.update(id, obj, options);
+            });
+        }
+        self._finish(req, res, p, 200);
+    }
+
+    // Handler for the add request (typically POST controller_base:/)
+    add(req, res) {
+        var self = this;
+        self.applyDefaults(req);
+        var body = req.body;
+        if (body instanceof Array) {
+            req.params.isBulk = true;
+            if (typeof req.query.all_or_none == 'undefined') {
+                req.query.all_or_none = false;
+            } else {
+                req.query.all_or_none = req.query.all_or_none == "true";
+            }
+            if (!body.length) {
+                return self.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
+            }
+        }
+        var p = self.getManager(req);
+        var options = self._getReqOptions(req);
+        if (req.params.isBulk) {
+            options.allOrNone = req.query.all_or_none;
+            p = p.then(function(mgr) {
+                return mgr.bulkAdd(body, options);
+            });
+            self._finish(req, res, p, 200);
+        } else {
+            p = p.then(function(mgr) {
+                return mgr.add(body, options);
+            });
+            self._finish(req, res, p, 201);
+        }
+    }
+
+    // Attach the controller to the app at a particular base
+    attach(app, prefix) {
+        // prepend prefix w/ /api/version str.  Express 5 (path-to-regexp v8) no
+        // longer supports inline regex in the path, so the version is validated by
+        // an app.param('version', ...) guard registered in server.js.
+        prefix = "/api/:version" + prefix;
+        this.apiPrefix = prefix;
+        app.get(prefix, this._wrapReadAuth(this.getAll));
+        app.get(prefix + "/:id", this._wrapReadAuth(this.get));
+        if (!app.get(SIS.OPT_READONLY)) {
+            // wrap authorization around modification calls
+            app.put(prefix + "/:id", this._wrapAuth(this.update));
+            app.put(prefix, this._wrapAuth(this.bulkUpdate));
+            app.post(prefix, this._wrapAuth(this.add));
+            // Express 5 dropped optional params (/:id?) - register both forms.
+            // The delete handler bulk-deletes when no id is present.
+            app.delete(prefix + "/:id", this._wrapAuth(this.delete));
+            app.delete(prefix, this._wrapAuth(this.delete));
+            // enable the commit api if we have a commitManager
+            if (this.commitManager) {
+                this._enableCommitApi(app, prefix);
+            }
+        }
+    }
+
+    // Returns a promise that authenticates a request
+    // The type specifies which kind of authentication to use
+    // and should have already been registered with passport
+    authenticate(req, res, type) {
+        return webUtil.authenticate(req, res, type);
+    }
+
+    // "private"
+    // Wrap a controller func with authorization
+    // The returned function is a request handler
+    // bound to the controller.
+    _wrapAuth(func) {
+        return function(req, res) {
+            if (!this.auth) {
+                return func.call(this, req, res);
+            }
+            var p = this.authenticate(req, res, SIS.SCHEMA_TOKENS);
+            var self = this;
+            p.then(function(auth) {
+                func.call(self, req, res);
+            })
+            .catch(function(err) {
+                return self.sendError(res, err);
+            });
+        }.bind(this);
+    }
+
+    // Wrap a read (GET) handler.  Reads only require a token when
+    // auth_reads is enabled.
+    _wrapReadAuth(func) {
+        if (this.authReads) {
+            return this._wrapAuth(func);
+        }
+        return func.bind(this);
+    }
+
+    // Enable the commit API endpoints
+    _enableCommitApi(app, prefix) {
+        // all history
+        var self = this;
+        app.get(prefix + "/:id/commits", this._wrapReadAuth(function(req, res) {
+            req.params.isCommitApi = true;
+            var type = this.getType(req);
+            var id = req.params.id;
+            var rq = this.parseQuery(req);
+            var mongooseModel = this.commitManager.model;
+
+            // update the query for the right types
+            rq.query.entity_id = id;
+            rq.query.type = type;
+
+            Promise.resolve(mongooseModel.countDocuments(rq.query).exec()).then(function(c) {
+                if (!c) {
+                    res.setHeader("x-total-count", 0);
+                    return self.sendObject(res, 200, []);
+                }
+                var opts = { skip : rq.offset, limit: rq.limit};
+                var mgQuery = mongooseModel.find(rq.query, rq.fields, opts).sort({date_modified: -1});
+                return Promise.resolve(mgQuery.exec()).then(function(entities) {
+                    res.setHeader("x-total-count", c);
+                    self.sendObject(res, 200, entities);
+                });
+            }).catch(function(err) {
+                res.setHeader("x-total-count", 0);
+                self.sendObject(res, 200, []);
+            });
+        }));
+
+        // specific entry by history id
+        app.get(prefix + "/:id/commits/:hid", this._wrapReadAuth(function(req, res) {
+            var type = this.getType(req);
+            var id = req.params.id;
+            var hid = req.params.hid;
+            req.params.isCommitApi = true;
+            this.commitManager.getVersionById(type, id, hid).then(function(result) {
+                if (!result) {
+                    return self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
+                }
+                result.value_at = self.convertToResponseObject(req, result.value_at);
+                self.sendObject(res, 200, result);
+            }, function(err) {
+                self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
+            });
+        }));
+
+        app.get(prefix + "/:id/revision/:utc", this._wrapReadAuth(function(req, res) {
+            var type = this.getType(req);
+            var id = req.params.id;
+            var utc = req.params.utc;
+            req.params.isCommitApi = true;
+            this.commitManager.getVersionByUtc(type, id, utc).then(function(result) {
+                if (!result) {
+                    return self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
+                }
+                self.sendObject(res, 200, self.convertToResponseObject(req, result));
+            }, function(err) {
+                self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
+            });
+
+        }));
+    }
+
+    _convertToResponseObject(req, obj) {
+        var self = this;
+        if (req.params.isBulk) {
+            // change the success array
+            obj.success = obj.success.map(function(o) {
+                if (req.method == SIS.METHOD_PUT) {
+                    // get the update value
+                    o = o.updated;
+                }
+                o = self.convertToResponseObject(req, o);
+                return o;
+            });
+            return obj;
+        }
+        if (obj instanceof Array) {
+            obj = obj.map(function(o) {
+                o = self.convertToResponseObject(req, o);
+                return o;
+            });
+        } else {
+            obj = self.convertToResponseObject(req, obj);
+        }
+        return obj;
+    }
+
+    // Get the callback that will send the result from the controller
+    _getSendCallback(req, res, code) {
+        var self = this;
+        return function(err, result) {
+            if (err) { return self.sendError(res, err); }
+            // hooks get the object - and the old one for an update
+            var toSend = result;
+            var hookEvt = SIS.METHODS_TO_EVENT[req.method];
+            if (!req.params.isBulk &&
+                req.method == SIS.METHOD_PUT && req.params.id) {
+                if (!result.old) {
+                    // an upsert that added the object - it was created
+                    code = 201;
+                    hookEvt = SIS.EVENT_INSERT;
+                    toSend = result.updated;
+                }
+                result = result.updated;
+            }
+            result = self._convertToResponseObject(req, result);
+            self.sendObject(res, code, result, req.params.isBulk);
+            // dispatch hooks
+            var hookType = self.getType(req);
+            if (self.hm && req.method in SIS.METHODS_TO_EVENT) {
+                if (req.params.isBulk) {
+                    // the objects as sent in the response
+                    toSend = result.success;
+                }
+                self.hm.dispatchHooks(toSend, hookType, hookEvt, req.params.isBulk);
+            }
+        };
+    }
+
+    _saveSingleCommit(req, result) {
+        var old = null;
+        var now = null;
+        switch (req.method) {
+            case SIS.METHOD_PUT:
+                // an update - old is null if an upsert added the object
+                old = result.old;
+                now = result.updated;
+                break;
+            case SIS.METHOD_POST:
+                // add
+                now = result;
+                break;
+            case SIS.METHOD_DELETE:
+                old = result;
+                break;
+            default:
+                return Promise.reject(SIS.ERR_INTERNAL("invalid commit being saved"));
+        }
+        // a commit that fails to save doesn't fail the request (for now)
+        var done = function() { return result; };
+        return this.commitManager.recordHistory(old, now, req.user, this.getType(req)).then(done, done);
+    }
+
+    _saveBulkCommits(req, items) {
+        // save it
+        var action = SIS.METHODS_TO_EVENT[req.method];
+        var type = this.getType(req);
+        return this.commitManager.recordHistoryBulk(items, req.user, action, type)
+        .then(function() {
+            return items;
+        });
+    }
+
+    // Save a commit to the commit log
+    _saveCommit(req) {
+        // need to return a promise that saves history
+        // but returns the initial object passed to it
+        return function(result) {
+            if (!this.shouldSaveCommit(req)) {
+                return Promise.resolve(result);
+            }
+
+            if (req.params.isBulk) {
+                var items = result.success;
+                if (items.length) {
+                    return this._saveBulkCommits(req, items)
+                    .then(function() {
+                        return result;
+                    }).catch(function() {
+                        return result;
+                    });
+                } else {
+                    return Promise.resolve(result);
+                }
+            } else {
+                return this._saveSingleCommit(req, result);
+            }
+        }.bind(this);
+    }
+
+    // Do the final steps of the request
+    // p is the promise that receives the object from the
+    // request handler
+    _finish(req, res, p, code) {
+        p = p.then(P.tap(this._saveCommit(req)));
+        var cb = this._getSendCallback(req, res, code);
+        p.then(function(result) {
+            cb(null, result);
+        })
+        .catch(function(err) {
+            cb(err);
+        });
+    }
+
+    // get request options to pass to managers per request
+    _getReqOptions(req) {
+        var result = {
+            user : req.user,
+            version : req.params.version,
+            log : req.log,
+            params : req.params,
+            query : req.query
+        };
+        if (req.method === "GET" && this.getterReadPref) {
+            result.read = this.getterReadPref;
+        }
+        return result;
+    }
+}
 
 // export it
 module.exports = exports = ApiController;

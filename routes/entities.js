@@ -5,81 +5,78 @@
 var ApiController = require("./apicontroller");
 var SIS = require("../util/constants");
 
-//////////
 // Entity controller
-function EntityController(config) {
-    var opts = { };
-    opts[SIS.OPT_LOG_COMMTS] = true;
-    opts[SIS.OPT_FIRE_HOOKS] = true;
-    opts[SIS.OPT_ID_FIELD] = SIS.FIELD_ID;
-    opts[SIS.OPT_USE_AUTH] = config[SIS.OPT_USE_AUTH];
-    SIS.UTIL_MERGE_SHALLOW(opts, config);
-    this.opts = opts;
-    ApiController.call(this, this.opts);
-}
+class EntityController extends ApiController {
+    constructor(config) {
+        var opts = { };
+        opts[SIS.OPT_LOG_COMMTS] = true;
+        opts[SIS.OPT_FIRE_HOOKS] = true;
+        opts[SIS.OPT_ID_FIELD] = SIS.FIELD_ID;
+        opts[SIS.OPT_USE_AUTH] = config[SIS.OPT_USE_AUTH];
+        SIS.UTIL_MERGE_SHALLOW(opts, config);
+        super(opts);
+        this.opts = opts;
+    }
 
-// inherit
-require('util').inherits(EntityController, ApiController);
+    // overrides
+    // Get the manager to handle this query
+    getManager(req) {
+        // Get the latest
+        var name = this.getType(req);
+        return this.sm.getEntityManager(name, this.opts)
+        .then(function(manager) {
+            req.sisManager = manager;
+            req.useLean = manager.model.schema._sis_defaultpaths.length === 0;
+            return manager;
+        });
+    }
 
-// overrides
-// Get the manager to handle this query
-EntityController.prototype.getManager = function(req) {
-    // Get the latest
-    var name = this.getType(req);
-    return this.sm.getEntityManager(name, this.opts)
-    .then(function(manager) {
-        req.sisManager = manager;
-        req.useLean = manager.model.schema._sis_defaultpaths.length === 0;
-        return manager;
-    });
-};
-
-EntityController.prototype.convertToResponseObject = function(req, obj) {
-    if (!req.sisManager) {
+    convertToResponseObject(req, obj) {
+        if (!req.sisManager) {
+            return obj;
+        }
+        var arrayPaths = req.sisManager.model.schema._sis_arraypaths;
+        if (req.query.removeEmpty && arrayPaths.length) {
+            if (!obj.toObject) {
+                obj = new req.sisManager.model(obj);
+            }
+            arrayPaths.forEach(function(p) {
+                var arr = obj.get(p);
+                if (arr && arr.length === 0) {
+                    obj.set(p, undefined);
+                }
+            });
+            obj = obj.toObject();
+        } else if (req.useLean && arrayPaths.length) {
+            // need to ensure the array is set to [] if it's null
+            req.sisManager.model.schema._sis_arraypaths.forEach(function(path) {
+                SIS.UTIL_SET_DEFAULT_ARRAY(obj, path);
+            });
+        }
         return obj;
     }
-    var arrayPaths = req.sisManager.model.schema._sis_arraypaths;
-    if (req.query.removeEmpty && arrayPaths.length) {
-        if (!obj.toObject) {
-            obj = new req.sisManager.model(obj);
-        }
-        arrayPaths.forEach(function(p) {
-            var arr = obj.get(p);
-            if (arr && arr.length === 0) {
-                obj.set(p, undefined);
+
+    shouldSaveCommit(req) {
+        return req.sisManager &&
+               req.sisManager.schema[SIS.FIELD_TRACK_HISTORY] &&
+               super.shouldSaveCommit(req);
+    }
+
+    // The type is the schema being requested
+    getType(req) {
+        return req.params.schema;
+    }
+
+    // Apply the default to populate the objects returned from GET
+    applyDefaults(req) {
+        if (req.method == "GET") {
+            // need to populate..
+            if (!('populate' in req.query)) {
+                req.query.populate = true;
             }
-        });
-        obj = obj.toObject();
-    } else if (req.useLean && arrayPaths.length) {
-        // need to ensure the array is set to [] if it's null
-        req.sisManager.model.schema._sis_arraypaths.forEach(function(path) {
-            SIS.UTIL_SET_DEFAULT_ARRAY(obj, path);
-        });
-    }
-    return obj;
-};
-
-EntityController.prototype.shouldSaveCommit = function(req) {
-    return req.sisManager &&
-           req.sisManager.schema[SIS.FIELD_TRACK_HISTORY] &&
-           ApiController.prototype.shouldSaveCommit.call(this, req);
-};
-
-// The type is the schema being requested
-EntityController.prototype.getType = function(req) {
-    return req.params.schema;
-};
-
-// Apply the default to populate the objects returned from GET
-EntityController.prototype.applyDefaults = function(req) {
-    if (req.method == "GET") {
-        // need to populate..
-        if (!('populate' in req.query)) {
-            req.query.populate = true;
         }
     }
-};
-/////////////////////////////////
+}
 
 // all route controllers expose a setup method
 module.exports.setup = function(app, config) {
