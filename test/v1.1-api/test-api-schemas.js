@@ -96,6 +96,18 @@ describe('@API @V1.1API - Schema API', function() {
                 .send(schema)
                 .expect(400, errHandler(done));
         });
+        it("Should fail to add a schema whose definition is not an object", async function() {
+            for (var definition of ["name", 5, ["name", "String"], null]) {
+                var res = await ApiServer.post("/api/v1.1/schemas")
+                    .send({ name : "test_bad_definition", _sis : { owner : ["sistest"] }, definition : definition })
+                    .expect(400);
+                res.body.error.should.eql("Bad request: Schema definition must be an object.");
+            }
+            res = await ApiServer.post("/api/v1.1/schemas")
+                .send({ name : "test_bad_definition", _sis : { owner : ["sistest"] } })
+                .expect(400);
+            res.body.error.should.eql("Bad request: Schema definition must be an object.");
+        });
         it("Should fail to add a schema with invalid JSON", function(done) {
             ApiServer.post("/api/v1.1/schemas")
                 .set("Content-type", "application/json")
