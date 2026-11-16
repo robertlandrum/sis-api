@@ -86,6 +86,14 @@ describe('@API @V1.1API - Bad requests', function() {
             expectInvalid(await ApiServer.get(tokensUrl).query({ q : "notjson" }).expect(400));
         });
 
+        it("rejects a CAS condition that is not an object", async function() {
+            for (var cas of ["null", "5", "[]", "{}", "notjson"]) {
+                var res = await ApiServer.put(url + "/keep_me").query({ cas : cas }).send({ type : "changed" })
+                    .expect(400);
+                res.body.error.should.match(/CAS condition must be an object/);
+            }
+        });
+
         it("does not let one request change the query of another", async function() {
             // these used to write the entity_id, type and username they query by
             // into the object every invalid query shared...

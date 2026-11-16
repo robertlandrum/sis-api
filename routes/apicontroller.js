@@ -352,7 +352,7 @@ class ApiController {
             } catch (ex) {
                 cas = { };
             }
-            if (typeof cas !== 'object' ||
+            if (!cas || typeof cas !== 'object' ||
                 cas instanceof Array ||
                 !Object.keys(cas).length) {
                 // invalid query
