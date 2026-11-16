@@ -1,9 +1,11 @@
-describe('HookManager', function() {
-    "use strict";
+import should from "should";
+import express from "express";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+import createSchemaManager from "../util/schema-manager.js";
+import createHookManager, { lookupsDone } from "../util/hook-manager.js";
 
-    var SIS = require("../util/constants");
-    var should = require('should');
-    var TestUtil = require('./fixtures/util');
+describe('HookManager', function() {
     var LocalTest = new TestUtil.LocalTest();
     var expectError = TestUtil.expectError;
 
@@ -11,8 +13,8 @@ describe('HookManager', function() {
 
     before(async function() {
         var mongoose = await LocalTest.start();
-        var schemaManager = require("../util/schema-manager")(mongoose, { auth : false});
-        hookManager = require('../util/hook-manager')(schemaManager);
+        var schemaManager = createSchemaManager(mongoose, { auth : false});
+        hookManager = createHookManager(schemaManager);
     });
 
     after(async function() {
@@ -234,7 +236,6 @@ describe('HookManager', function() {
         var failuresLeft = 0;
 
         before(async function() {
-            var express = require('express');
             var app = express();
             app.use(express.json());
             app.post('/hook', function(req, res) {
@@ -295,7 +296,6 @@ describe('HookManager', function() {
         });
 
         it("tracks the hook lookups that are running", async function() {
-            var lookupsDone = require('../util/hook-manager').lookupsDone;
             var dispatch = hookManager.dispatchHooks({ name : "e" }, "no_hooks_here", SIS.EVENT_INSERT, false);
             await lookupsDone();
             await dispatch;

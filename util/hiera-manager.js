@@ -1,10 +1,8 @@
 
 // Manager for hiera
 
-'use strict';
-
-var Manager = require("./manager");
-var SIS = require("./constants");
+import Manager from "./manager.js";
+import SIS from "./constants.js";
 
 // Hiera Manager
 // hiera overrides
@@ -37,6 +35,6 @@ class HieraManager extends Manager {
     }
 }
 
-module.exports = function(schemaManager, opts) {
+export default function(schemaManager, opts) {
     return new HieraManager(schemaManager, opts);
-};
+}

@@ -1,24 +1,23 @@
+import should from "should";
+import util from "util";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+import * as AuthFixture from "./fixtures/authdata.js";
+import createSchemaManager from "../util/schema-manager.js";
+
 describe('User Manager', function() {
-    "use strict";
-
-    var should = require('should');
-    var util = require('util');
-
-    var SIS = require("../util/constants");
-    var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
     var schemaManager = null;
 
     before(async function() {
         var mongoose = await LocalTest.start();
-        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
+        schemaManager = createSchemaManager(mongoose, { auth : true });
     });
 
     after(async function() {
         await LocalTest.stop();
     });
 
-    var AuthFixture = require("./fixtures/authdata");
     var users = AuthFixture.createUsers();
 
     var addTests = [

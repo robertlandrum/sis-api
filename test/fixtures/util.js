@@ -1,16 +1,18 @@
-"use strict";
-
-var nconf = require('nconf');
-var fs = require('fs');
-var path = require('path');
-var P = require('../../util/promises');
+import nconf from "nconf";
+import fs from "fs";
+import path from "path";
+import mongoose from "mongoose";
+import supertest from "supertest";
+import * as P from "../../util/promises.js";
+import SIS from "../../util/constants.js";
+import * as server from "../../server.js";
 
 function loadConfig() {
     nconf.env('__').argv();
-    nconf.file("config.test.json", __dirname + "/config.test.json");
+    nconf.file("config.test.json", import.meta.dirname + "/config.test.json");
     // git does not keep file modes; keep the test signing key private so the
     // server does not warn about it
-    fs.chmodSync(path.join(__dirname, "keys", "jwt-default.key"), parseInt("600", 8));
+    fs.chmodSync(path.join(import.meta.dirname, "keys", "jwt-default.key"), parseInt("600", 8));
 }
 
 function TestServer() {
@@ -18,7 +20,7 @@ function TestServer() {
 
     this.setupRemote = function(url, username, password) {
         serverData = {
-            request : require('supertest')(url),
+            request : supertest(url),
             username : username,
             password : password
         };
@@ -44,9 +46,7 @@ function TestServer() {
         if (serverData) {
             return serverData;
         }
-        var SIS = require("../../util/constants");
         loadConfig();
-        var server = require('../../server');
         var started = await new Promise(function(resolve) {
             server.startServer(function(app, http) {
                 resolve({ app : app, http : http });
@@ -75,7 +75,7 @@ function TestServer() {
             mongoose : server.mongoose,
             http : started.http,
             app : started.app,
-            request : require('supertest')('http://127.0.0.1:' + nconf.get("server:port")),
+            request : supertest('http://127.0.0.1:' + nconf.get("server:port")),
             local : true,
             schemaManager : schemaManager,
             superUser : localSuper,
@@ -182,7 +182,7 @@ function TestServer() {
     };
 }
 
-module.exports.TestServer = TestServer;
+export { TestServer };
 
 function LocalTest() {
     var dbData = null;
@@ -198,7 +198,6 @@ function LocalTest() {
             return dbData.mongoose;
         }
         loadConfig();
-        var mongoose = require('mongoose');
         await mongoose.connect(nconf.get('db').url);
         dbData = {
             mongoose : mongoose
@@ -225,12 +224,12 @@ function LocalTest() {
     this.superUser = { name : 'sistest', super_user : true };
 }
 
-module.exports.LocalTest = LocalTest;
+export { LocalTest };
 
 // utilities
 // Await a promise that must reject with a SIS error tuple of the given
 // status, optionally with a message matching pattern.  Resolves with the error.
-module.exports.expectError = async function(promise, status, pattern) {
+export async function expectError(promise, status, pattern) {
     var err = null;
     try {
         await promise;
@@ -250,19 +249,19 @@ module.exports.expectError = async function(promise, status, pattern) {
         throw new Error("expected an error matching " + pattern + ", got " + JSON.stringify(err[1]));
     }
     return err;
-};
+}
 
 // return full - subset.  both are arrays
-module.exports.invert = function(full, subset) {
+export function invert(full, subset) {
     return full.filter(function(item) {
         return subset.indexOf(item) == -1;
     });
-};
+}
 
 // values
-module.exports.objectValues = function(obj) {
+export function objectValues(obj) {
     var keys = Object.keys(obj);
     return keys.map(function(k) {
         return obj[k];
     });
-};
+}

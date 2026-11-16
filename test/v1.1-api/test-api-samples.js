@@ -1,15 +1,15 @@
-describe('@API @V1.1API - Samples', function() {
-    "use strict";
+import should from "should";
+import fs from "fs";
+import path from "path";
+import * as TestUtil from "../fixtures/util.js";
 
-    var should = require('should');
-    var path = require('path');
-    var TestUtil = require('../fixtures/util');
+describe('@API @V1.1API - Samples', function() {
     var ApiServer = new TestUtil.TestServer();
 
     // the example payloads in samples/ are what the docs point people to,
     // so they must work against the API as they are
     function sample(name) {
-        return require(path.join(__dirname, "..", "..", "samples", name));
+        return JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "..", "samples", name), "utf8"));
     }
 
     var schema = sample("schema_sample.json");

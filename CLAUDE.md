@@ -8,7 +8,7 @@ SIS (Service Information System) is a CMDB alternative: a REST-over-HTTP API whe
 clients define their own object types (`schemas`) and then CRUD instances of them
 (`entities`), with change history (`commits`), webhooks (`hooks`), key/value config
 (`hiera`), RBAC, and optional custom server-side `scripts`. It is an Express 5 app
-on modern Node (LTS, `engines: node >=20`) backed by MongoDB via Mongoose 8.
+on modern Node (LTS, `engines: node >=20.11`, for `import.meta.dirname`) backed by MongoDB via Mongoose 8.
 
 ## Commands
 
@@ -43,7 +43,6 @@ db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --no-config \
 ```
 
 Relevant env vars:
-- `SIS_RUN_LONG_TESTS=true` - enables the longer/replication suites.
 - `SIS_REMOTE_URL` - point the suite at a remote SIS instead of spawning a local server.
 - `db__url` - override the MongoDB connection string for a run.
 
@@ -137,12 +136,17 @@ bootstrap the first superuser, since the REST API requires an existing privilege
 
 ## Conventions
 
-- The code is moving to `async`/`await` ahead of an ESM conversion. The managers in
-  `util/`, the controllers in `routes/` and the endpoint code in `endpoints/` are
-  converted: they are ES classes (`class X extends Manager`, with `super(...)` and
+- The code is ES modules (`"type": "module"`): `import` at the top of a module with the
+  `.js` extension on local paths, `export default` for a module's main export (the
+  managers export their factory) and named exports for the rest - modules with only
+  named exports, such as `routes/webutil.js` or `util/logger.js`, are imported as a
+  namespace (`import * as webUtil from "./webutil.js"`). There is no `require`,
+  `module`, `__dirname` or `"use strict"` (modules are strict); use
+  `import.meta.dirname`, and read JSON with `fs`. The managers, controllers and
+  endpoint code are ES classes (`class X extends Manager`, with `super(...)` and
   `super.method(...)`) and use `async` methods, `try`/`catch` around awaited calls and
   arrow callbacks instead of `var self = this`, and take no callbacks. The specs are
-  `async` too. Write new code the converted way and cover it in the style of
+  `async` too. Write new code that way and cover it in the style of
   `test/test-manager.js` (`async` mocha tests, `await` on supertest requests and the
   `TestUtil` fixtures, and `TestUtil.expectError` for SIS error tuples). Assert in the
   test, not in a callback: a throw inside an express handler or a promise callback
@@ -170,10 +174,10 @@ bootstrap the first superuser, since the REST API requires an existing privilege
 - Express 5 notes: `req.query` is a re-parsing getter, so `server.js` snapshots it into a
   mutable own-property; the query parser is forced to `extended`; routes can't use inline
   regex or optional `:id?` (the `:version` param is validated via `app.param`).
-- `lodash` v4 and `async` v3 are the utility libs; keep `"use strict"` at the top of each
-  module and match the style of the surrounding code (it still uses `var`).
-- Require modules at the top of a module, never inside a function, ahead of the switch to
-  ES module imports. The local modules require each other without cycles - keep it that
-  way. Do not read the configuration (`nconf`) while a module loads; loggers from
-  `logger.createLogger` are made when first used, so creating them at load is fine.
+- `lodash` v4 is the utility lib; match the style of the surrounding code (it still
+  uses `var`).
+- The local modules import each other without cycles - keep it that way. Imports load
+  before a module's body runs, so do not read the configuration (`nconf`) while a module
+  loads; loggers from `logger.createLogger` are made when first used, so creating them
+  at load is fine.
 - API docs live in `docs/*.md`; `samples/` holds example schema/entity/hook JSON payloads.

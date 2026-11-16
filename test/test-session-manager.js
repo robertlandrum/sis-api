@@ -1,24 +1,17 @@
+import should from "should";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import crypto from "crypto";
+import childProcess from "child_process";
+import SIS from "../util/constants.js";
+import * as jose from "jose";
+import createSessionManager, { isJwt } from "../util/session-manager.js";
+import * as server from "../server.js";
+
 describe('Session Manager (JWT)', function() {
-    "use strict";
-
-    var should = require('should');
-    var fs = require('fs');
-    var os = require('os');
-    var path = require('path');
-    var crypto = require('crypto');
-    var childProcess = require('child_process');
-
-    var SIS = require("../util/constants");
-    var createSessionManager = require("../util/session-manager");
-    var server = require("../server");
-
-    var GEN_SCRIPT = path.join(__dirname, "..", "scripts", "gen-jwt-key.js");
+    var GEN_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "gen-jwt-key.js");
     var tmpDirs = [];
-    var jose = null;
-
-    before(function() {
-        return import("jose").then(function(mod) { jose = mod; });
-    });
 
     after(function() {
         tmpDirs.forEach(function(dir) {
@@ -79,7 +72,7 @@ describe('Session Manager (JWT)', function() {
 
         it("issues a JWT that verifies", function() {
             return sm.issue(user).then(function(t) {
-                createSessionManager.isJwt(t.name).should.be.true();
+                isJwt(t.name).should.be.true();
                 t.username.should.eql(user.name);
                 var remaining = t.expires.getTime() - Date.now();
                 remaining.should.be.above(SIS.AUTH_EXPIRATION_TIME - 5000);
@@ -208,10 +201,10 @@ describe('Session Manager (JWT)', function() {
         });
 
         it("detects JWT shaped tokens", function() {
-            createSessionManager.isJwt("0123456789abcdef0123456789abcdef").should.be.false();
-            createSessionManager.isJwt("a.b").should.be.false();
-            createSessionManager.isJwt("aa.bb.cc").should.be.true();
-            createSessionManager.isJwt(undefined).should.be.false();
+            isJwt("0123456789abcdef0123456789abcdef").should.be.false();
+            isJwt("a.b").should.be.false();
+            isJwt("aa.bb.cc").should.be.true();
+            isJwt(undefined).should.be.false();
         });
     });
 

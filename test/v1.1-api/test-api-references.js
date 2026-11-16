@@ -1,13 +1,9 @@
+import should from "should";
+import mongoose from "mongoose";
+import SIS from "../../util/constants.js";
+import * as TestUtil from "../fixtures/util.js";
+
 describe('@API @V1.1API - Entity References', function() {
-    "use strict";
-
-    var should = require('should');
-    var mongoose = require('mongoose');
-
-    var SIS = require("../../util/constants");
-
-    var TestUtil = require('../fixtures/util');
-
     var ApiServer = new TestUtil.TestServer();
 
     before(async function() {

@@ -1,11 +1,11 @@
 // simulate a schema update that occurs outside of the
 // manager work flows
-describe('Replication Simulation', function() {
-  "use strict";
 
-  var SIS = require("../util/constants");
-  var should = require('should');
-  var TestUtil = require('./fixtures/util');
+import should from "should";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+
+describe('Replication Simulation', function() {
   var ApiServer = new TestUtil.TestServer();
 
   var schemaManager = null;

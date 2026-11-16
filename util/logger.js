@@ -1,9 +1,9 @@
-"use strict";
+import bunyan from "bunyan";
+import crypto from "crypto";
+import nconf from "nconf";
+import _ from "lodash";
+
 // logger middleware
-var bunyan = require('bunyan');
-var crypto = require('crypto');
-var nconf = require('nconf');
-var _ = require('lodash');
 
 function toResponseTime(time) {
     var diff = process.hrtime(time);
@@ -35,12 +35,12 @@ function createLogger(opts) {
     });
 }
 
-module.exports.createLogger = createLogger;
+export { createLogger };
 
 // heavily borrowed from https://github.com/villadora/express-bunyan-logger/blob/master/index.js
 // but trimmed down
 // The errors are sent by the error handler server.js adds after this.
-module.exports.errorLoggingMiddleware = function(opts) {
+export function errorLoggingMiddleware(opts) {
     if (process.env.SIS_DISABLE_LOGGING === 'true') {
         return function(err, req, res, next) {
             next(err);
@@ -85,11 +85,11 @@ module.exports.errorLoggingMiddleware = function(opts) {
         res.on('close', log);
         next(err);
     };
-};
+}
 
-module.exports.loggingMiddleware = function(opts) {
-    var logger = module.exports.errorLoggingMiddleware(opts);
+export function loggingMiddleware(opts) {
+    var logger = errorLoggingMiddleware(opts);
     return function(req, res, next) {
         logger(null, req, res, next);
     };
-};
+}

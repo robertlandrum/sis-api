@@ -1,29 +1,37 @@
-"use strict";
-
-var cluster = require("cluster");
-var os = require("os");
-var express = require('express');
-var mongoose = require('mongoose');
-var nconf = require("nconf");
-var passport = require("passport");
-var logger = require('./util/logger');
-var SIS = require("./util/constants");
-var createSchemaManager = require('./util/schema-manager');
-var sessionManagerModule = require("./util/session-manager");
-var hookManagerModule = require('./util/hook-manager');
-var webUtil = require("./routes/webutil");
+import cluster from "cluster";
+import fs from "fs";
+import os from "os";
+import express from "express";
+import mongoose from "mongoose";
+import nconf from "nconf";
+import passport from "passport";
+import * as logger from "./util/logger.js";
+import SIS from "./util/constants.js";
+import createSchemaManager from "./util/schema-manager.js";
+import newSessionManager from "./util/session-manager.js";
+import { lookupsDone } from "./util/hook-manager.js";
+import * as webUtil from "./routes/webutil.js";
+import * as schemasRoutes from "./routes/schemas.js";
+import * as entitiesRoutes from "./routes/entities.js";
+import * as hieraRoutes from "./routes/hiera.js";
+import * as hooksRoutes from "./routes/hooks.js";
+import * as usersRoutes from "./routes/users.js";
+import * as tokensRoutes from "./routes/tokens.js";
+import * as infoRoutes from "./routes/info.js";
+import * as scriptsRoutes from "./routes/scripts.js";
+import * as endpointsRoutes from "./routes/endpoints.js";
 
 // routes we want to include
 var routes = [
-    require('./routes/schemas'),
-    require('./routes/entities'),
-    require('./routes/hiera'),
-    require('./routes/hooks'),
-    require('./routes/users'),
-    require('./routes/tokens'),
-    require('./routes/info'),
-    require('./routes/scripts'),
-    require('./routes/endpoints')
+    schemasRoutes,
+    entitiesRoutes,
+    hieraRoutes,
+    hooksRoutes,
+    usersRoutes,
+    tokensRoutes,
+    infoRoutes,
+    scriptsRoutes,
+    endpointsRoutes
 ];
 
 // Throws if the app config has settings that cannot work together
@@ -43,7 +51,7 @@ var createSessionManager = function(appConfig, logger) {
     if (!appConfig[SIS.OPT_USE_AUTH]) {
         return null;
     }
-    return sessionManagerModule(appConfig[SIS.OPT_JWT], {
+    return newSessionManager(appConfig[SIS.OPT_JWT], {
         requireSigningKey : !appConfig[SIS.OPT_READONLY],
         logger : logger
     });
@@ -194,8 +202,8 @@ var startServer = function(callback) {
 function main() {
     nconf.env({ separator : '__', parseValues : true })
         .argv()
-        .file("config.json.local", __dirname + "/conf/config.json.local")
-        .file("config.json", __dirname + "/conf/config.json");
+        .file("config.json.local", import.meta.dirname + "/conf/config.json.local")
+        .file("config.json", import.meta.dirname + "/conf/config.json");
 
     var LOGGER = logger.createLogger({
         name : "SISMain"
@@ -264,21 +272,21 @@ function main() {
     }
 }
 
-// Run if we're the root module
-if (!module.parent) {
+// Run if this is the script node was started with
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === import.meta.filename) {
     main();
 }
 
 
-module.exports.mongoose = mongoose;
-module.exports.startServer = startServer;
-module.exports.validateAppConfig = validateAppConfig;
-module.exports.createSessionManager = createSessionManager;
+export { mongoose };
+export { startServer };
+export { validateAppConfig };
+export { createSessionManager };
 // stops accepting requests, then lets running hook lookups finish so the
 // database connection can be closed
-module.exports.stopServer = function(server, callback) {
+export function stopServer(server, callback) {
     server.close(async function(err) {
-        await hookManagerModule.lookupsDone();
+        await lookupsDone();
         callback(err);
     });
-};
+}

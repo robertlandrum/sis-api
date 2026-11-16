@@ -1,24 +1,22 @@
+import should from "should";
+import net from "net";
+import path from "path";
+import ChildProcess from "child_process";
+import nconf from "nconf";
+
 describe('Server start', function() {
-    "use strict";
-
-    var should = require('should');
-    var net = require('net');
-    var path = require('path');
-    var ChildProcess = require('child_process');
-    var nconf = require('nconf');
-
     this.timeout(30000);
 
     // run server.js like a user would, until it exits.  Resolves with its
     // exit code and output.
     function runServer(env) {
-        var root = path.join(__dirname, "..");
+        var root = path.join(import.meta.dirname, "..");
         return new Promise(function(resolve) {
             var child = ChildProcess.spawn(process.execPath, ["server.js"], {
                 cwd : root,
                 env : Object.assign({ }, process.env, {
                     db__url : nconf.get("db:url"),
-                    app__jwt__keys_dir : path.join(__dirname, "fixtures", "keys"),
+                    app__jwt__keys_dir : path.join(import.meta.dirname, "fixtures", "keys"),
                     app__use_cluster : "false",
                     app__auth : "false"
                 }, env)

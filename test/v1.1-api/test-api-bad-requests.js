@@ -1,8 +1,7 @@
-describe('@API @V1.1API - Bad requests', function() {
-    "use strict";
+import should from "should";
+import * as TestUtil from "../fixtures/util.js";
 
-    var should = require('should');
-    var TestUtil = require('../fixtures/util');
+describe('@API @V1.1API - Bad requests', function() {
     var ApiServer = new TestUtil.TestServer();
 
     // entities that happen to have the fields the commits API queries by

@@ -1,7 +1,5 @@
-"use strict";
-
-var P = require('../../util/promises');
-var TestUtil = require('./util');
+import * as P from "../../util/promises.js";
+import * as TestUtil from "./util.js";
 
 var genUser = function(name, defaults) {
     defaults.name = name;
@@ -85,10 +83,10 @@ var createUsers = function() {
     };
 };
 
-module.exports.createUsers = createUsers;
+export { createUsers };
 // recreate users.  The helpers here resolve when done - and call callback
 // if one is given.
-module.exports.initUsers = function(ApiServer, token, users, callback) {
+export function initUsers(ApiServer, token, users, callback) {
     return P.nodeify(Promise.all(Object.keys(users).map(async function(name) {
         // delete user
         var res = await ApiServer.del('/api/v1.1/users/' + name, token);
@@ -99,17 +97,17 @@ module.exports.initUsers = function(ApiServer, token, users, callback) {
             .send(users[name])
             .expect(201);
     })), callback);
-};
+}
 
 // sets userToTokens[name] to a session token of each user
-module.exports.createTempTokens = function(ApiServer, userToTokens, users, callback) {
+export function createTempTokens(ApiServer, userToTokens, users, callback) {
     return P.nodeify(Promise.all(Object.keys(users).map(async function(name) {
         var user = users[name];
         userToTokens[name] = await ApiServer.getTempToken(user.name, user.pw);
     })), callback);
-};
+}
 
-module.exports.getAuthSchemas = function() {
+export function getAuthSchemas() {
     return {
         test_s1 : {
             name : 'test_s1',
@@ -147,9 +145,9 @@ module.exports.getAuthSchemas = function() {
             }
         }
     };
-};
+}
 
-module.exports.deleteSchemas = function(ApiServer, schemas, ensureExists, callback) {
+export function deleteSchemas(ApiServer, schemas, ensureExists, callback) {
     if (!(schemas instanceof Array)) {
         schemas = TestUtil.objectValues(schemas);
     }
@@ -157,18 +155,18 @@ module.exports.deleteSchemas = function(ApiServer, schemas, ensureExists, callba
         var req = ApiServer.del("/api/v1.1/schemas/" + schema.name);
         return ensureExists ? req.expect(200) : req;
     })), callback);
-};
+}
 
-module.exports.addSchemas = function(ApiServer, schemas, callback) {
+export function addSchemas(ApiServer, schemas, callback) {
     if (!(schemas instanceof Array)) {
         schemas = TestUtil.objectValues(schemas);
     }
     return P.nodeify(Promise.all(schemas.map(function(schema) {
         return ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
     })), callback);
-};
+}
 
-module.exports.createAuthEntities = function() {
+export function createAuthEntities() {
     return {
         test_s1_e1 : {
             schema : "test_s1",
@@ -208,4 +206,4 @@ module.exports.createAuthEntities = function() {
             }
         }
     };
-};
+}

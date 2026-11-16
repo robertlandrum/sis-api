@@ -1,16 +1,16 @@
+import should from "should";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+import createSchemaManager from "../util/schema-manager.js";
+import createEntityManager from "../util/entity-manager.js";
+
 describe("Mongo Collection Naming", function() {
-    "use strict";
-
-    var should = require('should');
-
-    var SIS = require("../util/constants");
-    var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
     var schemaManager = null;
 
     before(async function() {
         var mongoose = await LocalTest.start();
-        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
+        schemaManager = createSchemaManager(mongoose, { auth : true });
     });
 
     after(async function() {
@@ -49,7 +49,7 @@ describe("Mongo Collection Naming", function() {
             schemas.forEach(function(schema) {
                 var model = schemaManager.getEntityModel(schema);
                 should.exist(model);
-                entityManagers[schema.name] = require('../util/entity-manager')(model, schema, opts);
+                entityManagers[schema.name] = createEntityManager(model, schema, opts);
             });
         });
 

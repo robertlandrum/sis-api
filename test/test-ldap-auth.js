@@ -1,19 +1,18 @@
+import should from "should";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+import * as FakeLdap from "./fixtures/fake-ldap.js";
+import * as webUtil from "../routes/webutil.js";
+import createSchemaManager from "../util/schema-manager.js";
+
 describe('LDAP authentication', function() {
-    "use strict";
-
-    var should = require('should');
-    var SIS = require("../util/constants");
-    var TestUtil = require('./fixtures/util');
-    var FakeLdap = require('./fixtures/fake-ldap');
-    var webUtil = require("../routes/webutil");
-
     var LocalTest = new TestUtil.LocalTest();
     var schemaManager = null;
     var ldap = null;
 
     before(async function() {
         var mongoose = await LocalTest.start();
-        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
+        schemaManager = createSchemaManager(mongoose, { auth : true });
     });
 
     before(async function() {

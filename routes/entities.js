@@ -1,9 +1,8 @@
 // API for entities that adhere to schemas created via
 // the schemas API
-'use strict';
 
-var ApiController = require("./apicontroller");
-var SIS = require("../util/constants");
+import ApiController from "./apicontroller.js";
+import SIS from "../util/constants.js";
 
 // Entity controller
 class EntityController extends ApiController {
@@ -76,7 +75,7 @@ class EntityController extends ApiController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     var controller = new EntityController(config);
     controller.attach(app, "/entities/:schema");
-};
+}

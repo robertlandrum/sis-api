@@ -1,18 +1,13 @@
-"use strict";
-
 // Flat ESLint config (replaces the former grunt-contrib-jshint setup).
-// This is an older CommonJS codebase, so the config is intentionally lenient -
-// it flags genuine errors (undeclared globals, etc.) rather than style.
+// The code is ES modules - there are no require, module, exports or
+// __dirname globals - and the config is intentionally lenient: it flags
+// genuine errors (undeclared globals, etc.) rather than style.
 
 var nodeGlobals = {
     process: "readonly",
     console: "readonly",
     Buffer: "readonly",
-    __dirname: "readonly",
-    __filename: "readonly",
-    module: "writable",
-    require: "readonly",
-    exports: "writable",
+    URL: "readonly",
     global: "readonly",
     setTimeout: "readonly",
     clearTimeout: "readonly",
@@ -31,7 +26,7 @@ var mochaGlobals = {
     afterEach: "readonly"
 };
 
-module.exports = [
+export default [
     {
         ignores: ["node_modules/**", "dist/**", "test/fixtures/scripts/**"]
     },
@@ -39,7 +34,7 @@ module.exports = [
         files: ["**/*.js"],
         languageOptions: {
             ecmaVersion: 2022,
-            sourceType: "commonjs",
+            sourceType: "module",
             globals: nodeGlobals
         },
         rules: {

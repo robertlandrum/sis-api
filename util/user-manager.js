@@ -1,11 +1,9 @@
 // A class used to manage users, services and tokens
 
-'use strict';
-
-var SIS = require("./constants");
-var Manager = require("./manager");
-var crypto = require('crypto');
-var jsondiff = require("jsondiffpatch");
+import crypto from "crypto";
+import jsondiff from "jsondiffpatch";
+import SIS from "./constants.js";
+import Manager from "./manager.js";
 
 // Users
 class UserManager extends Manager {
@@ -181,6 +179,6 @@ class UserManager extends Manager {
     }
 }
 
-module.exports = function(sm) {
+export default function(sm) {
     return new UserManager(sm);
-};
+}

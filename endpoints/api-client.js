@@ -1,7 +1,5 @@
-"use strict";
-
-var webUtil = require("../routes/webutil");
-var createEntityManager = require("../util/entity-manager");
+import * as webUtil from "../routes/webutil.js";
+import createEntityManager from "../util/entity-manager.js";
 
 // Set options.populate to the paths of mgr the query wants populated
 async function setPopulate(query, mgr, schemaManager, options) {
@@ -110,4 +108,4 @@ function Client(schemaManager, hieraManager) {
     this.schemas = new GenericEp(schemaManager);
 }
 
-module.exports = Client;
+export default Client;

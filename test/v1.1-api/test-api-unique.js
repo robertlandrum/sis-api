@@ -1,10 +1,7 @@
+import should from "should";
+import * as TestUtil from "../fixtures/util.js";
+
 describe('@API @V1.1API - Unique fields', function() {
-    "use strict";
-
-    var should = require('should');
-
-    var TestUtil = require('../fixtures/util');
-
     var ApiServer = new TestUtil.TestServer();
 
     function uniqueSchema(name) {

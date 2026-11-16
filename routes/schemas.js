@@ -1,7 +1,5 @@
-'use strict';
-
-var ApiController = require("./apicontroller");
-var SIS = require("../util/constants");
+import ApiController from "./apicontroller.js";
+import SIS from "../util/constants.js";
 
 // Schema controller
 class SchemaController extends ApiController {
@@ -18,7 +16,7 @@ class SchemaController extends ApiController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     var controller = new SchemaController(config);
     controller.attach(app, "/schemas");
-};
+}

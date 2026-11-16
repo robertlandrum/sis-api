@@ -1,7 +1,5 @@
-'use strict';
-
-var ApiController = require("./apicontroller");
-var SIS = require("../util/constants");
+import ApiController from "./apicontroller.js";
+import SIS from "../util/constants.js";
 
 // User controller
 class UserController extends ApiController {
@@ -68,10 +66,10 @@ class UserController extends ApiController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     if (!config[SIS.OPT_USE_AUTH]) {
         return;
     }
     var controller = new UserController(config);
     controller.attach(app, "/users");
-};
+}

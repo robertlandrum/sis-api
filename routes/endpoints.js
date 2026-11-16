@@ -1,17 +1,15 @@
-'use strict';
-
-var ChildProcess = require("child_process");
-var express = require("express");
-var Pool = require("generic-pool");
-var P = require("../util/promises");
-var nconf = require("nconf");
-var logger = require("../util/logger");
+import ChildProcess from "child_process";
+import express from "express";
+import Pool from "generic-pool";
+import nconf from "nconf";
+import * as P from "../util/promises.js";
+import * as logger from "../util/logger.js";
+import SIS from "../util/constants.js";
+import * as webUtil from "./webutil.js";
 
 var WORKER_LOGGER = logger.createLogger({ name:"EndpointWorker" });
 var LOGGER = logger.createLogger({ name : "EndpointController" });
 
-var SIS = require("../util/constants");
-var webUtil = require("./webutil");
 // child states
 var IDLE = 0,
     DEAD = 1,
@@ -51,7 +49,7 @@ class EndpointWorker {
         }
         var createDefer = P.defer();
         this.childState = SPAWNING;
-        this.child = ChildProcess.fork(__dirname + "/../endpoints/main.js", args, { env : env });
+        this.child = ChildProcess.fork(import.meta.dirname + "/../endpoints/main.js", args, { env : env });
         // set a timeout - no message back in 5 seconds is bad
         var timer = setTimeout(function() {
             this.childState = ERROR;
@@ -264,10 +262,10 @@ class EndpointController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     if (!nconf.get('app:scripts_enabled')) {
         return;
     }
     var controller = new EndpointController(config);
     controller.attach(app, "/api/v1.1/endpoints");
-};
+}

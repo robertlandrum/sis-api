@@ -1,6 +1,5 @@
-"use strict";
-var csvStringify = require("csv-stringify");
-var yaml = require("js-yaml");
+import csvStringify from "csv-stringify";
+import yaml from "js-yaml";
 
 function Response(holder) {
     var headers = {};
@@ -47,4 +46,4 @@ function Response(holder) {
     };
 }
 
-module.exports = Response;
+export default Response;

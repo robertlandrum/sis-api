@@ -1,13 +1,14 @@
 // IPAddress type
-module.exports = exports = function IpAddr(mongoose) {
-    'use strict';
 
+import ipAddress from "ip-address";
+import util from "util";
+
+export default function IpAddr(mongoose) {
     var Schema = mongoose.Schema;
     var SchemaType = mongoose.SchemaType;
     var Types = mongoose.Types;
     var mongo = mongoose.mongo;
     var CastError = mongoose.Error.CastError;
-    var ipAddress = require("ip-address");
     var Address4 = ipAddress.Address4;
     var Address6 = ipAddress.Address6;
 
@@ -27,7 +28,7 @@ module.exports = exports = function IpAddr(mongoose) {
      * inherits
      */
 
-    require('util').inherits(IpAddress, SchemaType);
+    util.inherits(IpAddress, SchemaType);
 
     /**
      * Implement checkRequired method.
@@ -173,4 +174,4 @@ module.exports = exports = function IpAddr(mongoose) {
 
     Schema.Types.IpAddress = IpAddress;
     return IpAddress;
-};
+}

@@ -1,16 +1,12 @@
-
-
-'use strict';
-
-var fs = require('fs');
-var path = require('path');
-var SIS = require('../util/constants');
+import fs from "fs";
+import path from "path";
+import SIS from "../util/constants.js";
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     var build = null;
     try {
-        var buildPath = path.resolve(__dirname, '../build.json');
+        var buildPath = path.resolve(import.meta.dirname, '../build.json');
         build = fs.readFileSync(buildPath, 'utf8');
         build = JSON.parse(build);
     } catch (ex) {
@@ -20,4 +16,4 @@ module.exports.setup = function(app, config) {
     app.get("/api/:version/info", function(req, res) {
         res.status(200).json(build);
     });
-};
+}

@@ -6,26 +6,16 @@
 //   <keys_dir>/jwt-<kid>.pub  - public key, used to verify
 // keys_dir is resolved against the conf/ directory unless it is absolute.
 
-'use strict';
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import * as jose from "jose";
+import SIS from "./constants.js";
 
-var fs = require("fs");
-var path = require("path");
-var crypto = require("crypto");
-var SIS = require("./constants");
-
-var DEFAULT_CONF_DIR = path.join(__dirname, "..", "conf");
+var DEFAULT_CONF_DIR = path.join(import.meta.dirname, "..", "conf");
 var KID_PATTERN = /^[A-Za-z0-9._-]+$/;
 var PUB_FILE_PATTERN = /^jwt-([A-Za-z0-9._-]+)\.pub$/;
 var JWT_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-
-// jose is ESM-only, so load it lazily (once) via dynamic import.
-var josePromise = null;
-function loadJose() {
-    if (!josePromise) {
-        josePromise = import("jose");
-    }
-    return josePromise;
-}
 
 function keyFileName(kid, ext) {
     return "jwt-" + kid + "." + ext;
@@ -150,7 +140,6 @@ class SessionManager {
         var nowMs = Date.now();
         var iat = Math.floor(nowMs / 1000);
         var exp = Math.floor((nowMs + this.ttlMs) / 1000);
-        var jose = await loadJose();
         var jwt = await new jose.SignJWT({ sgen : user[SIS.FIELD_SESSION_GEN] || 0 })
             .setProtectedHeader({ alg : SIS.JWT_ALGORITHM, kid : this.activeKid, typ : "JWT" })
             .setIssuer(this.issuer)
@@ -170,7 +159,6 @@ class SessionManager {
     // Resolves with the verified claims, or rejects with a
     // SIS.ERR_BAD_CREDS error.
     async verify(token) {
-        var jose = await loadJose();
         var getKey = (header) => {
             var key = header.kid && this.verifyKeys[header.kid];
             if (!key) {
@@ -208,11 +196,11 @@ class SessionManager {
     }
 }
 
-module.exports = function(jwtConfig, opts) {
+export default function(jwtConfig, opts) {
     return new SessionManager(jwtConfig, opts);
-};
-module.exports.SessionManager = SessionManager;
-module.exports.isJwt = SessionManager.isJwt;
-module.exports.keyFileName = keyFileName;
-module.exports.KID_PATTERN = KID_PATTERN;
-module.exports.DEFAULT_CONF_DIR = DEFAULT_CONF_DIR;
+}
+export { SessionManager };
+export const isJwt = SessionManager.isJwt;
+export { keyFileName };
+export { KID_PATTERN };
+export { DEFAULT_CONF_DIR };

@@ -1,11 +1,10 @@
-'use strict';
-
-var passport = require('passport');
-var BasicStrategy = require('passport-http').BasicStrategy;
-var SIS = require("../util/constants");
-var P = require("../util/promises");
-var _ = require("lodash");
-var isJwt = require("../util/session-manager").isJwt;
+import passport from "passport";
+import { BasicStrategy } from "passport-http";
+import _ from "lodash";
+import * as ldapts from "ldapts";
+import SIS from "../util/constants.js";
+import * as P from "../util/promises.js";
+import { isJwt } from "../util/session-manager.js";
 
 // authorization using user and pass via the user manager
 var _verifyUserPass = function(user, pass, done) {
@@ -65,11 +64,9 @@ var getLdapVerificationFunc = function(sm, auth_config) {
             (user + '@' + ud);
         var client;
         try {
-            // ldapts is ESM-only, so load it lazily via dynamic import.
-            var ldapts = await import('ldapts');
             client = new ldapts.Client(client_opts);
         } catch (err) {
-            throw SIS.ERR_INTERNAL("Unable to load LDAP client : " + err);
+            throw SIS.ERR_INTERNAL("Unable to create the LDAP client : " + err);
         }
         try {
             await client.bind(ldapUser, pass);
@@ -163,7 +160,7 @@ var extractToken = function(req) {
     }
     return { token : token };
 };
-module.exports.extractToken = extractToken;
+export { extractToken };
 
 var getAuthType = function(config) {
     if (!config.auth_config || !config.auth_config.type ||
@@ -174,14 +171,14 @@ var getAuthType = function(config) {
 };
 
 // need a schema manager for the strategies
-module.exports.createUserPassStrategy = function(sm, config) {
+export function createUserPassStrategy(sm, config) {
     var type = getAuthType(config);
     var verifyFunc = _verifyUserPass.bind(sm);
     if (type == SIS.AUTH_TYPE_LDAP) {
         verifyFunc = getLdapVerificationFunc(sm, config.auth_config);
     }
     return new BasicStrategy({}, verifyFunc);
-};
+}
 
 // The passport strategy for authenticating x-auth-token / Bearer tokens
 class SisTokenStrategy extends passport.Strategy {
@@ -208,13 +205,13 @@ class SisTokenStrategy extends passport.Strategy {
     }
 }
 
-module.exports.createTokenStrategy = function(sm, sessionManager) {
+export function createTokenStrategy(sm, sessionManager) {
     return new SisTokenStrategy(sm, sessionManager);
-};
+}
 
 // Returns a promise that authenticates a request using the passport
 // strategy registered under type.  Sets req.user on success.
-module.exports.authenticate = function(req, res, type) {
+export function authenticate(req, res, type) {
     return new Promise(function(resolve, reject) {
         passport.authenticate(type, { session : false }, function(err, user) {
             if (err) {
@@ -232,13 +229,13 @@ module.exports.authenticate = function(req, res, type) {
             }
         })(req, res);
     });
-};
+}
 
 // The SIS error to send for an error passed to express's error handler:
 // a SIS error as it is, an error of the body parser (such as a body that is
 // not JSON or is too large) as a bad request with its 4xx status, and
 // anything else as an internal error
-module.exports.toSisError = function(err) {
+export function toSisError(err) {
     if (err instanceof Array && err.length >= 2) {
         return err;
     }
@@ -250,12 +247,12 @@ module.exports.toSisError = function(err) {
         return [err.status, badReq[1]];
     }
     return SIS.ERR_INTERNAL("Unexpected error : " + err);
-};
+}
 
 // Express middleware that rejects requests without a valid API token
-module.exports.requireToken = async function(req, res, next) {
+export async function requireToken(req, res, next) {
     try {
-        await module.exports.authenticate(req, res, SIS.SCHEMA_TOKENS);
+        await authenticate(req, res, SIS.SCHEMA_TOKENS);
     } catch (err) {
         if (!(err instanceof Array) || err.length < 2) {
             err = SIS.ERR_INTERNAL("Authentication failed : " + err);
@@ -264,7 +261,7 @@ module.exports.requireToken = async function(req, res, next) {
         return;
     }
     next();
-};
+}
 
 var mapIds = function(objs) {
     return objs.map(function(obj) {
@@ -369,7 +366,7 @@ var OR_AND_NOR = ["$or","$and","$nor"];
 // "flatten" a query of mgr's objects to deal with all joins: a condition on
 // a path of referenced objects becomes one on the ids of the objects that
 // match it.  Resolves with the flattened query.
-module.exports.flattenCondition = async function(condition, schemaManager, mgr) {
+export async function flattenCondition(condition, schemaManager, mgr) {
     var references = mgr.getReferences();
     if (!condition || typeof condition !== 'object' ||
         !references || !references.length) {
@@ -412,7 +409,7 @@ module.exports.flattenCondition = async function(condition, schemaManager, mgr) 
         // the flattened conditions of $or, $and and $nor
         Promise.all(orAndNor.map(function(key) {
             return Promise.all(condition[key].map(function(inner) {
-                return module.exports.flattenCondition(inner, schemaManager, mgr);
+                return flattenCondition(inner, schemaManager, mgr);
             }));
         }))
     ]);
@@ -429,9 +426,9 @@ module.exports.flattenCondition = async function(condition, schemaManager, mgr) 
         flattened[orAndNor[i]] = conditions;
     });
     return flattened;
-};
+}
 
-module.exports.parsePopulate = function(reqQuery) {
+export function parsePopulate(reqQuery) {
     reqQuery = reqQuery || { };
     var param = reqQuery.populate;
     if (typeof param === 'string') {
@@ -442,20 +439,20 @@ module.exports.parsePopulate = function(reqQuery) {
     } else {
         return param || false;
     }
-};
+}
 
 // The query parseQuery returns when q is not a JSON object.  Frozen: it is
 // shared by every such request, so nothing may add a condition to it.
 var ERROR_QUERY = Object.freeze({});
 
-module.exports.ERROR_QUERY = ERROR_QUERY;
+export { ERROR_QUERY };
 
 // The error to send for a query parseQuery returned ERROR_QUERY for
-module.exports.invalidQueryError = function() {
+export function invalidQueryError() {
     return SIS.ERR_BAD_REQ("Query parameter is invalid.  Must be JSON");
-};
+}
 
-module.exports.parseQuery = function(reqQuery, version, enforceLimit) {
+export function parseQuery(reqQuery, version, enforceLimit) {
     var query = reqQuery.q || { };
     // try parsing..
     try {
@@ -511,4 +508,4 @@ module.exports.parseQuery = function(reqQuery, version, enforceLimit) {
         result.sort = sortOpt;
     }
     return result;
-};
+}

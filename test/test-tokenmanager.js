@@ -1,24 +1,25 @@
+import should from "should";
+import util from "util";
+import crypto from "crypto";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+import * as AuthFixture from "./fixtures/authdata.js";
+import createSchemaManager from "../util/schema-manager.js";
+
 describe('Token Manager', function() {
-    "use strict";
-
-    var should = require('should');
-    var util = require('util');
-
-    var SIS = require("../util/constants");
-    var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
     var schemaManager = null;
 
     before(async function() {
         var mongoose = await LocalTest.start();
-        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
+        schemaManager = createSchemaManager(mongoose, { auth : true });
     });
 
     after(async function() {
         await LocalTest.stop();
     });
 
-    var users = require("./fixtures/authdata").createUsers();
+    var users = AuthFixture.createUsers();
     var addTests = [
         // array defining test
         // firstuser can add seconduser pass/fail
@@ -177,7 +178,6 @@ describe('Token Manager', function() {
         });
 
         it("retries a token name that is taken", async function() {
-            var crypto = require("crypto");
             var tokenManager = schemaManager.getTokenManagerForUser(owner.name);
             // the unique index on the token name is rebuilt in the background
             // after earlier specs drop the database - wait for it

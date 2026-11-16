@@ -1,8 +1,6 @@
-'use strict';
-
-var ApiController = require("./apicontroller");
-var SIS = require("../util/constants");
-var createHieraManager = require("../util/hiera-manager");
+import ApiController from "./apicontroller.js";
+import SIS from "../util/constants.js";
+import createHieraManager from "../util/hiera-manager.js";
 
 // Hiera controller
 class HieraController extends ApiController {
@@ -39,7 +37,7 @@ class HieraController extends ApiController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     var controller = new HieraController(config);
     controller.attach(app, "/hiera");
-};
+}

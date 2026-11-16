@@ -1,12 +1,12 @@
-describe('EntityManager', function() {
-    "use strict";
+import should from "should";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+import createSchemaManager from "../util/schema-manager.js";
 
+describe('EntityManager', function() {
     // Tests of util/entity-manager.js through managers built by the schema
     // manager the way the entities controller builds them.
 
-    var SIS = require("../util/constants");
-    var should = require('should');
-    var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
     var expectError = TestUtil.expectError;
 
@@ -50,7 +50,7 @@ describe('EntityManager', function() {
 
     before(async function() {
         var mongoose = await LocalTest.start();
-        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
+        schemaManager = createSchemaManager(mongoose, { auth : true });
         for (var key of Object.keys(schemas)) {
             await schemaManager.add(JSON.parse(JSON.stringify(schemas[key])), { user : superUser });
         }

@@ -1,8 +1,6 @@
-'use strict';
-
-var ApiController = require("./apicontroller");
-var SIS = require("../util/constants");
-var createHookManager = require("../util/hook-manager");
+import ApiController from "./apicontroller.js";
+import SIS from "../util/constants.js";
+import createHookManager from "../util/hook-manager.js";
 
 // Hook controller
 class HookController extends ApiController {
@@ -37,7 +35,7 @@ class HookController extends ApiController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     var controller = new HookController(config);
     controller.attach(app, "/hooks");
-};
+}

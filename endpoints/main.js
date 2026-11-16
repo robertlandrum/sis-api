@@ -1,23 +1,21 @@
 // The script runner child process entry point
 
-'use strict';
-
-var nconf = require('nconf');
-var mongoose = require("mongoose");
-var SIS = require("../util/constants");
-var logger = require("../util/logger");
-var createSchemaManager = require('../util/schema-manager');
-var ScriptRunner = require('./runner');
+import nconf from "nconf";
+import mongoose from "mongoose";
+import SIS from "../util/constants.js";
+import * as logger from "../util/logger.js";
+import createSchemaManager from "../util/schema-manager.js";
+import ScriptRunner from "./runner.js";
 
 if (process.env.TESTING) {
     nconf.env("__")
         .argv()
-        .file("config.test.json", __dirname + "/../test/fixtures/config.test.json");
+        .file("config.test.json", import.meta.dirname + "/../test/fixtures/config.test.json");
 } else {
     nconf.env('__')
         .argv()
-        .file("config.json.local", __dirname + "/../conf/config.json.local")
-        .file("config.json", __dirname + "/../conf/config.json");
+        .file("config.json.local", import.meta.dirname + "/../conf/config.json.local")
+        .file("config.json", import.meta.dirname + "/../conf/config.json");
 }
 
 

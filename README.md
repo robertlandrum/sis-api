@@ -39,7 +39,7 @@ More details can be found in the [API Documentation](./docs/index.md)
 
 The following are required to build and run SIS:
 
-- [Node.js](https://nodejs.org/) 20 or later (see the `engines` field in `package.json`).
+- [Node.js](https://nodejs.org/) 20.11 or later (see the `engines` field in `package.json`).
 - [MongoDB](https://www.mongodb.org/) 4.4+ (tested against MongoDB 7).
 
 If you would rather not install these locally, see
@@ -80,16 +80,18 @@ db__url="mongodb://localhost:27018/sis-test" npm test
 ```
 
 To run a single spec, list `test/init-tests.js` first (it starts the shared
-server and seeds a superuser) followed by the target spec:
+server and seeds a superuser) followed by the target spec. `--no-config` keeps
+mocha from also running every spec `.mocharc.yml` lists, so pass the preload and
+`--exit` it would have:
 
 ```bash
-db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --timeout 60000 \
+db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --no-config \
+  --require scripts/gen-build-info.js --timeout 60000 --exit \
   test/init-tests.js test/v1.1-api/test-api-entities.js
 ```
 
 Relevant environment variables:
 
-- `SIS_RUN_LONG_TESTS=true` - enable the longer/replication suites.
 - `SIS_REMOTE_URL` - run the suite against a remote SIS instead of spawning a local server.
 - `db__url` - override the MongoDB connection string for a run.
 

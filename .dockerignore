@@ -6,7 +6,6 @@ npm-debug.log
 .git
 .gitignore
 .github
-.travis.yml
 
 # Local-only config and build artifacts (regenerated in the image)
 *.local

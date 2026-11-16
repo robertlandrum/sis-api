@@ -2,10 +2,8 @@
 // inserting history into sis_history
 // Does not subclass Manager
 
-'use strict';
-
-var jsondiff = require('jsondiffpatch');
-var SIS = require('./constants');
+import jsondiff from "jsondiffpatch";
+import SIS from "./constants.js";
 
 var docToPojo = function(doc) {
     if (typeof doc.toObject === 'function') {
@@ -218,6 +216,6 @@ class CommitManager {
     }
 }
 
-module.exports = function(schemaManager) {
+export default function(schemaManager) {
     return new CommitManager(schemaManager);
-};
+}

@@ -1,9 +1,9 @@
-describe("Hook Dispatch", function() {
-    "use strict";
+import should from "should";
+import express from "express";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
 
-    var SIS = require("../util/constants");
-    var should = require('should');
-    var TestUtil = require('./fixtures/util');
+describe("Hook Dispatch", function() {
     var ApiServer = new TestUtil.TestServer();
 
     it("Should setup fixtures", async function() {
@@ -19,7 +19,6 @@ describe("Hook Dispatch", function() {
     // answers each request, and next() resolves with the next request it
     // answered: { method, path, query, body, status }.
     async function startReceiver(port, handle) {
-        var express = require('express');
         var app = express();
         // parse nested query strings (data[entity_type]=...) like Express 4 did
         app.set('query parser', 'extended');
@@ -287,7 +286,6 @@ describe("Hook Dispatch", function() {
         });
 
         before(async function() {
-            var express = require('express');
             var receiver = express();
             receiver.set('query parser', 'extended');
             receiver.use(express.json());
