@@ -39,7 +39,7 @@ More details can be found in the [API Documentation](./docs/index.md)
 
 The following are required to build and run SIS:
 
-- [Node.js](https://nodejs.org/) 20.11 or later (see the `engines` field in `package.json`).
+- [Node.js](https://nodejs.org/) 22 or later (see the `engines` field in `package.json`).
 - [MongoDB](https://www.mongodb.org/) 4.4+ (tested against MongoDB 7).
 
 If you would rather not install these locally, see

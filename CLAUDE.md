@@ -8,7 +8,7 @@ SIS (Service Information System) is a CMDB alternative: a REST-over-HTTP API whe
 clients define their own object types (`schemas`) and then CRUD instances of them
 (`entities`), with change history (`commits`), webhooks (`hooks`), key/value config
 (`hiera`), RBAC, and optional custom server-side `scripts`. It is an Express 5 app
-on modern Node (LTS, `engines: node >=20.11`, for `import.meta.dirname`) backed by MongoDB via Mongoose 8.
+on modern Node (LTS, `engines: node >=22`) backed by MongoDB via Mongoose 8.
 
 ## Commands
 
