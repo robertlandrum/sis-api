@@ -18,49 +18,6 @@ var requestDefaults = { };
 
 
 /////////////////////////////////
-// Hook Manager
-function HookManager(sm, opts) {
-    var model = sm.getSisModel(SIS.SCHEMA_HOOKS);
-    opts = opts || {};
-    opts[SIS.OPT_USE_AUTH] = sm.authEnabled;
-    Manager.call(this, model, opts);
-    var hookRequestDefaults = nconf.get('hooks:request_defaults');
-    if (hookRequestDefaults) {
-        requestDefaults = hookRequestDefaults;
-    }
-    this.sm = sm;
-}
-
-require('util').inherits(HookManager, Manager);
-
-HookManager.prototype.validate = function(modelObj, toUpdate, options) {
-    if (!modelObj) {
-        return "No model defined.";
-    }
-    if(!modelObj.name) {
-        return "Hook has no name.";
-    }
-    if(!modelObj.entity_type) {
-        return "Hook has no entity_type.";
-    }
-    if(!modelObj.target) {
-        return "Hook has no target.";
-    }
-    if(!modelObj.target.url) {
-        return "Hook target has no url.";
-    }
-    if(!modelObj.target.action) {
-        return "Hook target has no action.";
-    }
-    if(!modelObj.events) {
-        return "Hook has no on parameter.";
-    }
-    if(!modelObj.events.length) {
-        return "Hook on parameter has no values.";
-    }
-    return this.validateOwner(modelObj, options);
-};
-/////////////////////////////////
 
 var sleep = function(ms) {
     return new Promise(function(resolve) { setTimeout(resolve, ms); });
@@ -153,36 +110,79 @@ function trackLookup(lookup) {
     return lookup;
 }
 
-// Send the event to the hooks of entity_type that want it.  Resolves with
-// the hooks' response bodies - or null if a hook failed, which is logged.
-// Callers do not wait for this, so it never rejects.
-HookManager.prototype.dispatchHooks = async function(entity, entity_type, event, isBulk) {
-    var query = { "entity_type" : entity_type, "events" : event };
-    try {
-        var hooks = await trackLookup(Promise.resolve(this.model.find(query, null, { lean : true }).exec()));
-        return await Promise.all(hooks.map(function(hook) {
-            return dispatchHook(hook, entity, event, isBulk);
-        }));
-    } catch (err) {
-        LOGGER.error({ err: err }, "Error running hooks");
-        return null;
+// Hook Manager
+class HookManager extends Manager {
+    constructor(sm, opts) {
+        var model = sm.getSisModel(SIS.SCHEMA_HOOKS);
+        opts = opts || {};
+        opts[SIS.OPT_USE_AUTH] = sm.authEnabled;
+        super(model, opts);
+        var hookRequestDefaults = nconf.get('hooks:request_defaults');
+        if (hookRequestDefaults) {
+            requestDefaults = hookRequestDefaults;
+        }
+        this.sm = sm;
     }
-};
 
-// force trigger
-HookManager.prototype.triggerHooks = async function(entityType, entityId, opts) {
-    opts = opts || { };
-    var mgr = await this.sm.getEntityManager(entityType);
-    opts.lean = mgr.model.schema._sis_defaultpaths.length === 0;
-    var entity = await mgr.getById(entityId);
-    // trigger an update from the entity to itself
-    this.dispatchHooks({ old : entity, updated : entity }, entityType, SIS.EVENT_UPDATE, false);
-    return {
-        message: "Hooks triggered successfully",
-        type: entityType,
-        entity: entity
-    };
-};
+    validate(modelObj, toUpdate, options) {
+        if (!modelObj) {
+            return "No model defined.";
+        }
+        if(!modelObj.name) {
+            return "Hook has no name.";
+        }
+        if(!modelObj.entity_type) {
+            return "Hook has no entity_type.";
+        }
+        if(!modelObj.target) {
+            return "Hook has no target.";
+        }
+        if(!modelObj.target.url) {
+            return "Hook target has no url.";
+        }
+        if(!modelObj.target.action) {
+            return "Hook target has no action.";
+        }
+        if(!modelObj.events) {
+            return "Hook has no on parameter.";
+        }
+        if(!modelObj.events.length) {
+            return "Hook on parameter has no values.";
+        }
+        return this.validateOwner(modelObj, options);
+    }
+
+    // Send the event to the hooks of entity_type that want it.  Resolves with
+    // the hooks' response bodies - or null if a hook failed, which is logged.
+    // Callers do not wait for this, so it never rejects.
+    async dispatchHooks(entity, entity_type, event, isBulk) {
+        var query = { "entity_type" : entity_type, "events" : event };
+        try {
+            var hooks = await trackLookup(Promise.resolve(this.model.find(query, null, { lean : true }).exec()));
+            return await Promise.all(hooks.map(function(hook) {
+                return dispatchHook(hook, entity, event, isBulk);
+            }));
+        } catch (err) {
+            LOGGER.error({ err: err }, "Error running hooks");
+            return null;
+        }
+    }
+
+    // force trigger
+    async triggerHooks(entityType, entityId, opts) {
+        opts = opts || { };
+        var mgr = await this.sm.getEntityManager(entityType);
+        opts.lean = mgr.model.schema._sis_defaultpaths.length === 0;
+        var entity = await mgr.getById(entityId);
+        // trigger an update from the entity to itself
+        this.dispatchHooks({ old : entity, updated : entity }, entityType, SIS.EVENT_UPDATE, false);
+        return {
+            message: "Hooks triggered successfully",
+            type: entityType,
+            entity: entity
+        };
+    }
+}
 
 module.exports = function(schemaManager, opts) {
     return new HookManager(schemaManager);
