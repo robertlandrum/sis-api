@@ -48,26 +48,22 @@ describe('EntityManager', function() {
         return schemaManager.getEntityManager(schema.name, opts);
     }
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            if (err) { return done(err); }
-            schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
-            (async function() {
-                for (var key of Object.keys(schemas)) {
-                    await schemaManager.add(JSON.parse(JSON.stringify(schemas[key])), { user : superUser });
-                }
-                // a reference to a schema that no longer exists
-                await schemaManager.delete(schemas.gone.name, { user : superUser });
-                var targetManager = await getManager(schemas.target);
-                for (var name of ["t1", "t2"]) {
-                    targets.push(await targetManager.add({ name : name }, { user : superUser }));
-                }
-            })().then(function() { done(); }, done);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
+        for (var key of Object.keys(schemas)) {
+            await schemaManager.add(JSON.parse(JSON.stringify(schemas[key])), { user : superUser });
+        }
+        // a reference to a schema that no longer exists
+        await schemaManager.delete(schemas.gone.name, { user : superUser });
+        var targetManager = await getManager(schemas.target);
+        for (var name of ["t1", "t2"]) {
+            targets.push(await targetManager.add({ name : name }, { user : superUser }));
+        }
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
 
     describe('validate', function() {
