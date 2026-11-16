@@ -10,15 +10,29 @@ function toResponseTime(time) {
     return (diff[0] * 1000) + (diff[1] / 1000000);
 }
 
+// A bunyan logger with opts and the configured logger:options.  It is made
+// the first time it is used, so modules can create their loggers when they
+// load - before the configuration is read.
 function createLogger(opts) {
-    var loggerOptions = nconf.get("logger:options");
-    var serializerOpts = {
-        serializers : {
-            err : bunyan.stdSerializers.err
+    var log = null;
+    var getLog = function() {
+        if (!log) {
+            var serializerOpts = {
+                serializers : {
+                    err : bunyan.stdSerializers.err
+                }
+            };
+            log = bunyan.createLogger(_.merge({ }, opts, nconf.get("logger:options"), serializerOpts));
         }
+        return log;
     };
-    opts = _.merge(opts || { }, loggerOptions, serializerOpts);
-    return bunyan.createLogger(opts);
+    return new Proxy({ }, {
+        get : function(target, prop) {
+            var l = getLog();
+            var value = l[prop];
+            return typeof value === "function" ? value.bind(l) : value;
+        }
+    });
 }
 
 module.exports.createLogger = createLogger;
