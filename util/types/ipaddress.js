@@ -61,6 +61,10 @@ export default function IpAddr(mongoose) {
         'subnet_mask'
     ];
 
+    /**
+     * @param {import("ip-address").Address4 | import("ip-address").Address6} addr
+     * @param {string} version
+     */
     var toObject = function(addr, version) {
         var end = addr.endAddress();
         var start = addr.startAddress();

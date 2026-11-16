@@ -23,12 +23,23 @@
     "qs": "^6.14.0"
   },
   "devDependencies": {
+    "@types/bunyan": "^1.8.11",
+    "@types/clone": "^2.1.4",
+    "@types/express": "^5.0.6",
+    "@types/js-yaml": "^4.0.9",
+    "@types/lodash": "^4.17.27",
+    "@types/nconf": "^0.10.7",
+    "@types/node": "^22.20.5",
+    "@types/passport": "^1.0.17",
+    "@types/passport-http": "^0.3.11",
+    "@types/qs": "^6.15.1",
     "c8": "^12.0.0",
     "csv-parse": "^5.6.0",
     "eslint": "^10.0.0",
     "mocha": "^11.7.4",
     "should": "^13.2.3",
-    "supertest": "^7.3.1"
+    "supertest": "^7.3.1",
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -39,6 +50,7 @@
     "gen-jwt-key": "node scripts/gen-jwt-key.js",
     "test": "mocha",
     "coverage": "c8 --reporter=html --reporter=text mocha",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc -p ."
   }
 }

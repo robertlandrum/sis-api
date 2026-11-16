@@ -21,8 +21,10 @@ with the `db__url` env var (nconf reads `__` as the nested-key separator), e.g.
 - `npm start` / `node server.js` - run the server.
 - `npm test` - run the mocha suite (config in `.mocharc.yml`).
 - `npm run lint` - run eslint (flat config in `eslint.config.js`).
+- `npm run typecheck` - `tsc` over the app code (`tsconfig.json`: `checkJs`, `noEmit`,
+  not strict; the tests are not checked).
 - `npm run coverage` - mocha under `c8`.
-- CI: `.github/workflows/ci.yml` runs the lint and the suite on Node 22 and 24 against
+- CI: `.github/workflows/ci.yml` runs the lint, the type check and the suite on Node 22 and 24 against
   MongoDB 7 for pushes to `develop` / `main` and every pull request.
 - `npm run build` - generate `build.json` (consumed by the `/info` endpoint).
 
@@ -178,6 +180,11 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   regex or optional `:id?` (the `:version` param is validated via `app.param`).
 - `lodash` v4 is the utility lib; match the style of the surrounding code (it still
   uses `var`).
+- Types are JSDoc, checked by `npm run typecheck`. The shapes shared across layers have
+  typedefs: `SisError` (`util/constants.js`) and `ManagerOptions`, `UpdateResult` and
+  `BulkResult` (`util/manager.js`) - use them in the JSDoc of new code, e.g.
+  `@returns {Promise<UpdateResult>}`. Dependencies without their own types get an
+  `@types/*` dev dependency.
 - The local modules import each other without cycles - keep it that way. Imports load
   before a module's body runs, so do not read the configuration (`nconf`) while a module
   loads; loggers from `logger.createLogger` are made when first used, so creating them

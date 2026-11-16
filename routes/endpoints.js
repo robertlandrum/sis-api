@@ -45,7 +45,7 @@ class EndpointWorker {
         // propagate to the worker; flag test runs so it loads the test config.
         var env = Object.assign({}, process.env);
         if (nconf.get("app:test")) {
-            env.TESTING = true;
+            env.TESTING = "true";
         }
         var createDefer = P.defer();
         this.childState = SPAWNING;
