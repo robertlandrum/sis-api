@@ -4,7 +4,6 @@
   "name": "SIS",
   "description": "Service Information System",
   "dependencies": {
-    "async": "^3.2.6",
     "bunyan": "^1.8.15",
     "clone": "^2.1.2",
     "csv-stringify": "^5.6.5",

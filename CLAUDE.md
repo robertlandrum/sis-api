@@ -43,7 +43,6 @@ db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --no-config \
 ```
 
 Relevant env vars:
-- `SIS_RUN_LONG_TESTS=true` - enables the longer/replication suites.
 - `SIS_REMOTE_URL` - point the suite at a remote SIS instead of spawning a local server.
 - `db__url` - override the MongoDB connection string for a run.
 
@@ -170,7 +169,7 @@ bootstrap the first superuser, since the REST API requires an existing privilege
 - Express 5 notes: `req.query` is a re-parsing getter, so `server.js` snapshots it into a
   mutable own-property; the query parser is forced to `extended`; routes can't use inline
   regex or optional `:id?` (the `:version` param is validated via `app.param`).
-- `lodash` v4 and `async` v3 are the utility libs; keep `"use strict"` at the top of each
+- `lodash` v4 is the utility lib; keep `"use strict"` at the top of each
   module and match the style of the surrounding code (it still uses `var`).
 - Require modules at the top of a module, never inside a function, ahead of the switch to
   ES module imports. The local modules require each other without cycles - keep it that

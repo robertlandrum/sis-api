@@ -89,7 +89,6 @@ db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --timeout 60000
 
 Relevant environment variables:
 
-- `SIS_RUN_LONG_TESTS=true` - enable the longer/replication suites.
 - `SIS_REMOTE_URL` - run the suite against a remote SIS instead of spawning a local server.
 - `db__url` - override the MongoDB connection string for a run.
 
