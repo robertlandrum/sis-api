@@ -41,6 +41,12 @@ class ApiController {
     //       log creates/update/deletions
     // - fire_hooks - boolean indicating if web hooks should be fired
     constructor(opts) {
+        /**
+         * The manager of the objects - set by subclasses that have one, the
+         * others override getManager
+         * @type {import("../util/manager.js").default}
+         */
+        this.manager = null;
         this.sm = opts[SIS.OPT_SCHEMA_MGR];
         this.auth = SIS.OPT_USE_AUTH in opts ? opts[SIS.OPT_USE_AUTH] : SIS.DEFAULT_OPT_USE_AUTH;
         this.authReads = SIS.OPT_AUTH_READS in opts ? !!opts[SIS.OPT_AUTH_READS] : SIS.DEFAULT_OPT_AUTH_READS;

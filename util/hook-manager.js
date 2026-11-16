@@ -21,9 +21,16 @@ var sleep = function(ms) {
     return new Promise(function(resolve) { setTimeout(resolve, ms); });
 };
 
-// Send the hook request, retrying up to retryCount times delay seconds
-// apart.  Resolves with the response body.
+/**
+ * Send the hook request, retrying up to retryCount times delay seconds
+ * apart.  Resolves with the response body.
+ * @param {{ url : string, method : string, headers? : Object<string, string>, body? : string }} options
+ * @param {number} retryCount
+ * @param {number} delay
+ * @returns {Promise<string>}
+ */
 var sendRequest = async function(options, retryCount, delay) {
+    /** @type {RequestInit} */
     var fetchOpts = Object.assign({ }, requestDefaults, { method: options.method });
     fetchOpts.headers = Object.assign({ }, requestDefaults.headers, options.headers);
     if (options.body !== undefined) {
@@ -34,6 +41,7 @@ var sendRequest = async function(options, retryCount, delay) {
             var res = await fetch(options.url, fetchOpts);
             if (res.status >= 300) {
                 // non 2xx - treat as an error so the retry logic kicks in
+                /** @type {Error & { statusCode? : number }} */
                 var httpErr = new Error("Hook target responded with status " + res.status);
                 httpErr.statusCode = res.status;
                 throw httpErr;

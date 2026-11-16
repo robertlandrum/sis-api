@@ -52,7 +52,7 @@ async function start() {
     var schemaManager = createSchemaManager(mongoose, appConfig);
     await schemaManager.bootstrapEntitySchemas();
     var runner = new ScriptRunner(schemaManager);
-    process.on("message", function(msg) {
+    process.on("message", function(/** @type {{ type : string, data : any }} */ msg) {
         if (msg.type === SIS.EP_REQ) {
             handleRequest(runner, msg.data);
         }

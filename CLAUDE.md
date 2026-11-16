@@ -21,8 +21,10 @@ with the `db__url` env var (nconf reads `__` as the nested-key separator), e.g.
 - `npm start` / `node server.js` - run the server.
 - `npm test` - run the mocha suite (config in `.mocharc.yml`).
 - `npm run lint` - run eslint (flat config in `eslint.config.js`).
+- `npm run typecheck` - `tsc` over the app code (`tsconfig.json`: `checkJs`, `noEmit`,
+  not strict; the tests are not checked).
 - `npm run coverage` - mocha under `c8`.
-- CI: `.github/workflows/ci.yml` runs the lint and the suite on Node 22 and 24 against
+- CI: `.github/workflows/ci.yml` runs the lint, the type check and the suite on Node 22 and 24 against
   MongoDB 7 for pushes to `develop` / `main` and every pull request.
 - `npm run build` - generate `build.json` (consumed by the `/info` endpoint).
 

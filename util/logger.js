@@ -10,10 +10,15 @@ function toResponseTime(time) {
     return (diff[0] * 1000) + (diff[1] / 1000000);
 }
 
-// A bunyan logger with opts and the configured logger:options.  It is made
-// the first time it is used, so modules can create their loggers when they
-// load - before the configuration is read.
+/**
+ * A bunyan logger with opts and the configured logger:options.  It is made
+ * the first time it is used, so modules can create their loggers when they
+ * load - before the configuration is read.
+ * @param {{ name : string } & Object<string, any>} opts
+ * @returns {import("bunyan")}
+ */
 function createLogger(opts) {
+    /** @type {import("bunyan")} */
     var log = null;
     var getLog = function() {
         if (!log) {
@@ -26,13 +31,13 @@ function createLogger(opts) {
         }
         return log;
     };
-    return new Proxy({ }, {
+    return /** @type {import("bunyan")} */ (new Proxy({ }, {
         get : function(target, prop) {
             var l = getLog();
             var value = l[prop];
             return typeof value === "function" ? value.bind(l) : value;
         }
-    });
+    }));
 }
 
 export { createLogger };

@@ -4,6 +4,13 @@ import util from "util";
 import diff from "jsondiffpatch";
 import * as logger from "./logger.js";
 
+/**
+ * A SIS error: the HTTP status, the body sent to the client
+ * ({ error, code }) and, for some, what caused it - which goes to the log,
+ * never to the client.
+ * @typedef {[number, { error : string, code : number }, any?]} SisError
+ */
+
 var FIELD_LOCKED = "locked";
 var FIELD_IMMUTABLE = "immutable";
 var FIELD_OWNER = "owner";
@@ -179,16 +186,20 @@ var SIS = {
     // errors
     // error objects are an array w/ first elem as http status, second as err obj
     // i.e. [ 404, { error : "string", code : ### }]
+    /** @returns {SisError} */
     ERR_NOT_FOUND : function(type, id) {
         return [404, { error : util.format("%s %s does not exist", type, id), code : 1000 }];
     },
+    /** @returns {SisError} */
     ERR_BAD_REQ : function(msg) {
         return [400, { error : util.format("Bad request: %s", msg), code : 1001 }];
     },
     // the object conflicts with an existing one, e.g. a unique field's value is taken
+    /** @returns {SisError} */
     ERR_CONFLICT : function(msg) {
         return [409, { error : util.format("Conflict: %s", msg), code : 1005 }];
     },
+    /** @returns {SisError} - or null for no msg */
     ERR_INTERNAL : function(msg) {
         if (!msg) { return null; }
         if (typeof msg == 'object' && msg.name == 'ValidationError') {
@@ -206,6 +217,7 @@ var SIS = {
         var text = msg instanceof Error ? String(msg) : msg;
         return [500, { error : util.format("Internal error %s", text), code : 1002 }, msg];
     },
+    /** @returns {SisError} */
     ERR_INTERNAL_OR_NOT_FOUND : function(err, type, id, result) {
         if (err) {
             if (typeof err == 'object' && err.name == 'CastError') {
@@ -216,6 +228,7 @@ var SIS = {
             return SIS.ERR_NOT_FOUND(type, id);
         }
     },
+    /** @returns {SisError} */
     ERR_BAD_CREDS : function(msg) {
         if (typeof msg !== 'string') {
             msg = JSON.stringify(msg);

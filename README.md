@@ -65,11 +65,12 @@ The available npm scripts are:
 - `npm start` - run the server (`node server.js`).
 - `npm test` - run the Mocha suite (config in `.mocharc.yml`).
 - `npm run lint` - run ESLint (flat config in `eslint.config.js`).
+- `npm run typecheck` - type check the JavaScript with TypeScript (`tsconfig.json`); nothing is compiled.
 - `npm run coverage` - run the test suite under `c8` and emit an HTML + text report.
 - `npm run build` - generate `build.json` (consumed by the `/info` endpoint).
 - `npm run gen-jwt-key [kid]` - generate an Ed25519 key pair in `conf/keys/` for signing session tokens.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs the lint and the test suite, on
+GitHub Actions (`.github/workflows/ci.yml`) runs the lint, the type check and the test suite, on
 Node 22 and 24 against MongoDB 7, for every push to `develop` or `main` and every
 pull request.
 

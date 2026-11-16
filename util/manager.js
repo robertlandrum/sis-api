@@ -36,9 +36,10 @@ class Manager {
 
     // can return a document or promise
     // this function receives a doc retrieved from the database
-    // and the object sent in the update request
+    // and the object sent in the update request - and the options of the
+    // update, which subclasses may use (the entity manager's forceMixed)
     // The default just sets the fields sent in the update
-    applyUpdate(doc, updateObj) {
+    applyUpdate(doc, updateObj, options) {
         // merge:true preserves mongoose 4 semantics where setting a nested object
         // deep-merges rather than replacing the whole subtree.
         doc.set(updateObj, undefined, { merge: true });

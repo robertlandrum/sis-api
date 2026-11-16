@@ -6,6 +6,7 @@ npm-debug.log
 .git
 .gitignore
 .github
+tsconfig.json
 
 # Local-only config and build artifacts (regenerated in the image)
 *.local
