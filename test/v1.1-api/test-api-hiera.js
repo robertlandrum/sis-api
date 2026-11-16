@@ -9,47 +9,45 @@ describe('@API @V1.1API - Hiera API', function() {
 
     var ApiServer = new TestUtil.TestServer();
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) { done(e); return; }
-            ApiServer.becomeSuperUser(done);
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
     describe("Hiera failure cases", function() {
-        it("Should error retrieving an unknown entry", function(done) {
-            ApiServer.get("/api/v1.1/hiera/dne").expect(404, done);
+        it("Should error retrieving an unknown entry", async function() {
+            await ApiServer.get("/api/v1.1/hiera/dne").expect(404);
         });
-        it("Should error deleting an unknown entry", function(done) {
-            ApiServer.del("/api/v1.1/hiera/dne").expect(404, done);
+        it("Should error deleting an unknown entry", async function() {
+            await ApiServer.del("/api/v1.1/hiera/dne").expect(404);
         });
-        it("Should fail to add an entry missing 'name'", function(done) {
-            ApiServer.post("/api/v1.1/hiera")
+        it("Should fail to add an entry missing 'name'", async function() {
+            await ApiServer.post("/api/v1.1/hiera")
                 .set("Content-Type", "application/json")
                 .send({"hieradata" : {"this" : "should", "not" : "work"}})
-                .expect(400, done);
+                .expect(400);
         });
-        it("Should fail to add an entry missing 'hieradata'", function(done) {
-            ApiServer.post("/api/v1.1/hiera")
+        it("Should fail to add an entry missing 'hieradata'", async function() {
+            await ApiServer.post("/api/v1.1/hiera")
                 .set("Content-Type", "application/json")
                 .send({"name" : "whatever"})
-                .expect(400, done);
+                .expect(400);
         });
-        it("Should fail to add an entry with null 'hieradata'", function(done) {
-            ApiServer.post("/api/v1.1/hiera")
+        it("Should fail to add an entry with null 'hieradata'", async function() {
+            await ApiServer.post("/api/v1.1/hiera")
                 .set("Content-Type", "application/json")
                 .send({"name" : "whatever", hieradata : null })
-                .expect(400, done);
+                .expect(400);
         });
-        it("Should fail to update an entry that doesn't exist", function(done) {
-            ApiServer.put("/api/v1.1/hiera/dne")
+        it("Should fail to update an entry that doesn't exist", async function() {
+            await ApiServer.put("/api/v1.1/hiera/dne")
                 .set("Content-Type", "application/json")
                 .send({"name" : "dne", _sis : { "owner" : "foo" }, "hieradata" : {"key1" : "v1"}})
-                .expect(404, done);
+                .expect(404);
         });
     });
 
@@ -67,77 +65,65 @@ describe('@API @V1.1API - Hiera API', function() {
             }
         };
 
-        before(function(done) {
-            ApiServer.del("/api/v1.1/hiera/" + item.name)
-                .end(done);
+        before(async function() {
+            await ApiServer.del("/api/v1.1/hiera/" + item.name);
         });
 
-        it("Should add the hiera entry", function(done) {
-            ApiServer.post("/api/v1.1/hiera")
+        it("Should add the hiera entry", async function() {
+            await ApiServer.post("/api/v1.1/hiera")
                 .set("Content-Type", "application/json")
                 .send(item)
-                .expect(201, done);
+                .expect(201);
         });
-        it("Should receive only the data portion with key", function(done) {
-            ApiServer
+        it("Should receive only the data portion with key", async function() {
+            var res = await ApiServer
                 .get("/api/v1.1/hiera/host.name.here")
-                .expect(200)
-                .end(function(err, res) {
-                    should.not.exist(err);
-                    should.exist(res.body['host.name.here']);
-                    var body = res.body['host.name.here'];
-                    should.exist(body.servers);
-                    should.exist(body.port);
-                    done();
-                });
+                .expect(200);
+            should.exist(res.body['host.name.here']);
+            var body = res.body['host.name.here'];
+            should.exist(body.servers);
+            should.exist(body.port);
         });
-        it("Should remove the port key and add a name key", function(done) {
-            ApiServer
+        it("Should remove the port key and add a name key", async function() {
+            var res = await ApiServer
                 .put("/api/v1.1/hiera/host.name.here")
                 .set("Content-Type", "application/json")
                 .send({"name" : "host.name.here", _sis : { "owner" : "test" }, "hieradata" : {"port" : null, "name" : "some_name"}})
-                .expect(200)
-                .end(function(err, res) {
-                    should.not.exist(err);
-                    var hieradata = res.body.hieradata;
-                    should.exist(hieradata);
-                    should.exist(hieradata.servers);
-                    should.not.exist(hieradata.port);
-                    should.exist(hieradata.name);
-                    done();
-                });
+                .expect(200);
+            var hieradata = res.body.hieradata;
+            should.exist(hieradata);
+            should.exist(hieradata.servers);
+            should.not.exist(hieradata.port);
+            should.exist(hieradata.name);
         });
-        it("Should remove the k field from obj and add the l field", function(done) {
-            ApiServer.put("/api/v1.1/hiera/host.name.here")
+        it("Should remove the k field from obj and add the l field", async function() {
+            var res = await ApiServer.put("/api/v1.1/hiera/host.name.here")
                 .set("Content-Type", "application/json")
                 .send({"name" : "host.name.here", _sis : { "owner" : "test" }, "hieradata" : { "obj" : { "k" : null, "l" : "l"} } })
-                .expect(200, function(err, res) {
-                    should.not.exist(err);
-                    var hieradata = res.body.hieradata;
-                    should.exist(hieradata);
-                    should.exist(hieradata.servers);
-                    should.exist(hieradata.obj.j);
-                    should.not.exist(hieradata.obj.k);
-                    should.exist(hieradata.obj.l);
-                    done(err, hieradata);
-                });
+                .expect(200);
+            var hieradata = res.body.hieradata;
+            should.exist(hieradata);
+            should.exist(hieradata.servers);
+            should.exist(hieradata.obj.j);
+            should.not.exist(hieradata.obj.k);
+            should.exist(hieradata.obj.l);
         });
-        it("Should fail to update an entry with invalid data", function(done) {
-            ApiServer.put("/api/v1.1/hiera/host.name.here")
+        it("Should fail to update an entry with invalid data", async function() {
+            await ApiServer.put("/api/v1.1/hiera/host.name.here")
                 .set("Content-Type", "application/json")
                 .send({"hieradata" : {"key1" : "v1"}})
-                .expect(400, done);
+                .expect(400);
         });
-        it("Should fail to update entry with mismatched name and path", function(done) {
-            ApiServer
+        it("Should fail to update entry with mismatched name and path", async function() {
+            await ApiServer
                 .put("/api/v1.1/hiera/host.name.here")
                 .set("Content-Type", "application/json")
                 .send({"name" : "does.not.match", _sis : { "owner" : "test" }, "hieradata" : {"should" : "fail"}})
-                .expect(400, done);
+                .expect(400);
         });
-        it("Should delete the hiera entry", function(done) {
-            ApiServer.del("/api/v1.1/hiera/host.name.here")
-                .expect(200, done);
+        it("Should delete the hiera entry", async function() {
+            await ApiServer.del("/api/v1.1/hiera/host.name.here")
+                .expect(200);
         });
     });
 
@@ -158,46 +144,33 @@ describe('@API @V1.1API - Hiera API', function() {
             hieradata : initialValue
         };
 
-        function ensureGetEquals(value, done) {
-            ApiServer.get("/api/v1.1/hiera/" + hieraEntry.name)
-                .expect(200, function(err, res) {
-                    if (err) { done(err); return; }
-                    var hieraObject = res.body;
-                    should.exist(hieraObject[hieraEntry.name]);
-                    var hieraData = hieraObject[hieraEntry.name];
-                    hieraData.should.eql(value);
-                    done();
-                });
+        // the write's response and the entry read back both hold value
+        async function ensureEqual(res, value) {
+            var hieradata = res.body.hieradata;
+            should.exist(hieradata);
+            hieradata.should.eql(value);
+            var hieraObject = (await ApiServer.get("/api/v1.1/hiera/" + hieraEntry.name).expect(200)).body;
+            should.exist(hieraObject[hieraEntry.name]);
+            hieraObject[hieraEntry.name].should.eql(value);
         }
 
-        function ensureEqual(value, done) {
-            return function(err, res) {
-                if (err) { done(err); return; }
-                var hieradata = res.body.hieradata;
-                should.exist(hieradata);
-                hieradata.should.eql(value);
-                ensureGetEquals(value, done);
-            };
-        }
-
-        before(function(done) {
-             ApiServer.del("/api/v1.1/hiera/" + hieraEntry.name)
-             .end(function(err) {
-                 if (err) { done(err); return; }
-                 ApiServer.post("/api/v1.1/hiera")
-                     .set("Content-Type", "application/json")
-                     .send(hieraEntry)
-                     .expect(201, ensureEqual(initialValue, done));
-             });
+        before(async function() {
+            await ApiServer.del("/api/v1.1/hiera/" + hieraEntry.name);
+            var res = await ApiServer.post("/api/v1.1/hiera")
+                .set("Content-Type", "application/json")
+                .send(hieraEntry)
+                .expect(201);
+            await ensureEqual(res, initialValue);
         });
 
         values.forEach(function(val) {
-            it("Should set hiera to " + JSON.stringify(val), function(done) {
+            it("Should set hiera to " + JSON.stringify(val), async function() {
                 hieraEntry.hieradata = val;
-                ApiServer.put("/api/v1.1/hiera/" + hieraEntry.name)
+                var res = await ApiServer.put("/api/v1.1/hiera/" + hieraEntry.name)
                     .set("Content-Type", "application/json")
                     .send(hieraEntry)
-                    .expect(200, ensureEqual(val, done));
+                    .expect(200);
+                await ensureEqual(res, val);
             });
         });
     });

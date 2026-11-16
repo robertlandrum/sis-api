@@ -6,59 +6,77 @@ describe("Hook Dispatch", function() {
     var TestUtil = require('./fixtures/util');
     var ApiServer = new TestUtil.TestServer();
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) { return done(e); }
-            ApiServer.becomeSuperUser(done);
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
+
+    // Start an http server on port for hooks to call.  handle(req, res)
+    // answers each request, and next() resolves with the next request it
+    // answered: { method, path, query, body, status }.
+    async function startReceiver(port, handle) {
+        var express = require('express');
+        var app = express();
+        // parse nested query strings (data[entity_type]=...) like Express 4 did
+        app.set('query parser', 'extended');
+        app.use(express.json());
+        var answered = [];
+        var waiting = [];
+        app.use(function(req, res) {
+            handle(req, res);
+            var got = { method : req.method, path : req.path, query : req.query, body : req.body,
+                        status : res.statusCode };
+            if (waiting.length) {
+                waiting.shift()(got);
+            } else {
+                answered.push(got);
+            }
+        });
+        var server = await new Promise(function(resolve) {
+            var s = app.listen(port, function() { resolve(s); });
+        });
+        return {
+            next : function() {
+                if (answered.length) {
+                    return Promise.resolve(answered.shift());
+                }
+                return new Promise(function(resolve, reject) {
+                    var waiter = function(got) {
+                        clearTimeout(timer);
+                        resolve(got);
+                    };
+                    var timer = setTimeout(function() {
+                        waiting.splice(waiting.indexOf(waiter), 1);
+                        reject(new Error("no hook request on port " + port + " within 5s"));
+                    }, 5000);
+                    waiting.push(waiter);
+                });
+            },
+            close : function() {
+                return new Promise(function(resolve) { server.close(resolve); });
+            }
+        };
+    }
 
     describe("test-get-hook-dispatch", function() {
-        // the done callback that our listening server will callback on
-        var doneCallback = null;
-        // hook server - receives the hook events
-        var hookServer = null;
-        var hookHttpServer = null;
+        var receiver = null;
         var hookName = "test_hook_get";
         var hook = null;
+        var postCount = 0;
 
-        before(function(done) {
-            var express = require('express');
-            hookServer = express();
-            // parse nested query strings (data[entity_type]=...) like Express 4 did
-            hookServer.set('query parser', 'extended');
-            hookServer.use(express.json());
-            hookServer.get('/hook', function(req, res) {
-                should.exist(req.query.data);
-                var data = req.query.data;
-                data.entity_type.should.eql("sis_hiera");
-                data.hook.should.eql(hookName);
-                data.event.should.eql(SIS.EVENT_INSERT);
-                res.send("ok");
-                if (doneCallback) {
-                    doneCallback();
-                }
-            });
-
-
-            var postCount = 0;
-            hookServer.post('/hook_retry', function(req, res) {
-                should.exist(req.body);
-                if (!postCount) {
-                    postCount++;
+        before(async function() {
+            receiver = await startReceiver(3335, function(req, res) {
+                if (req.method === "POST" && !postCount++) {
+                    // the first POST is answered with an error, to be retried
                     res.status(400).send("Need to retry.");
                 } else {
-                    res.status(200).send("ok");
-                    if (doneCallback) {
-                        doneCallback();
-                    }
+                    res.send("ok");
                 }
             });
-
             hook = {
                 "name" : hookName,
                 _sis : { "owner" : ["Test"] },
@@ -69,21 +87,15 @@ describe("Hook Dispatch", function() {
                 },
                 "events": [ SIS.EVENT_INSERT ]
             };
-
-            hookHttpServer = hookServer.listen(3335, function(err) {
-                if (err) {
-                    done(err);
-                }
-                ApiServer.post('/api/v1.1/hooks')
-                    .send(hook)
-                    .expect(201, done);
-            });
+            await ApiServer.post('/api/v1.1/hooks')
+                .send(hook)
+                .expect(201);
         });
 
-        after(function(done) {
-            hookHttpServer.close();
-            ApiServer.del('/api/v1.1/hooks/' + hookName)
-                .expect(200, done);
+        after(async function() {
+            await receiver.close();
+            await ApiServer.del('/api/v1.1/hooks/' + hookName)
+                .expect(200);
         });
 
         var hiera_data = {
@@ -95,60 +107,54 @@ describe("Hook Dispatch", function() {
             }
         };
 
-        it("Should dispatch the hiera hook", function(doneCb) {
-            doneCallback = doneCb;
-            ApiServer.post("/api/v1.1/hiera")
+        it("Should dispatch the hiera hook", async function() {
+            await ApiServer.post("/api/v1.1/hiera")
                 .set('content-type', 'application/json')
                 .send(hiera_data)
-                .end(function(err, res) { });
+                .expect(201);
+            var got = await receiver.next();
+            got.method.should.eql("GET");
+            got.path.should.eql("/hook");
+            should.exist(got.query.data);
+            got.query.data.entity_type.should.eql("sis_hiera");
+            got.query.data.hook.should.eql(hookName);
+            got.query.data.event.should.eql(SIS.EVENT_INSERT);
         });
 
-        it("Should dispatch the update hook and retry", function(doneCb) {
-            doneCallback = doneCb;
+        it("Should dispatch the update hook and retry", async function() {
             hook.target.action = "POST";
             hook.target.url = "http://127.0.0.1:3335/hook_retry";
             hook.retry_count = 5;
             hook.retry_delay = 1;
             hook.events.push(SIS.EVENT_UPDATE);
-            ApiServer.put('/api/v1.1/hooks/' + hook.name)
-            .send(hook).expect(200, function(err, result) {
-                if (err) { console.log(err); console.log(result); return doneCb(err); }
-                hiera_data.hieradata.field3 = 'foo';
-                ApiServer.put("/api/v1.1/hiera/hiera_key")
-                    .set('content-type', 'application/json')
-                    .send(hiera_data)
-                    .end(function(err, res) { });
-            });
+            await ApiServer.put('/api/v1.1/hooks/' + hook.name)
+                .send(hook).expect(200);
+            hiera_data.hieradata.field3 = 'foo';
+            await ApiServer.put("/api/v1.1/hiera/hiera_key")
+                .set('content-type', 'application/json')
+                .send(hiera_data)
+                .expect(200);
+            // the first attempt fails, the retry gets through
+            var first = await receiver.next();
+            first.path.should.eql("/hook_retry");
+            first.status.should.eql(400);
+            var retry = await receiver.next();
+            retry.path.should.eql("/hook_retry");
+            retry.status.should.eql(200);
+            retry.body.event.should.eql(SIS.EVENT_UPDATE);
+            retry.body.should.eql(first.body);
         });
     });
 
     describe("test-post-hook-dispatch", function() {
-        // the done callback that our listening server will callback on
-        var doneCallback = null;
-        // hook server - receives the hook events
-        var hookServer = null;
-        var hookHttpServer = null;
+        var receiver = null;
         var hookName = "test_hook";
-        var hook = null;
 
-        before(function(done) {
-            var express = require('express');
-            hookServer = express();
-            // parse nested query strings (data[entity_type]=...) like Express 4 did
-            hookServer.set('query parser', 'extended');
-            hookServer.use(express.json());
-            hookServer.post('/hook', function(req, res) {
-                should.exist(req.body);
-                req.body.entity_type.should.eql(SIS.SCHEMA_SCHEMAS);
-                req.body.hook.should.eql(hookName);
-                req.body.event.should.eql(SIS.EVENT_INSERT);
+        before(async function() {
+            receiver = await startReceiver(3334, function(req, res) {
                 res.send("ok");
-                if (doneCallback) {
-                    doneCallback();
-                }
             });
-
-            hook = {
+            var hook = {
                 "name" : hookName,
                 _sis : { "owner" : [ "Test" ] },
                 "entity_type" : SIS.SCHEMA_SCHEMAS,
@@ -158,21 +164,16 @@ describe("Hook Dispatch", function() {
                 },
                 "events": [ SIS.EVENT_INSERT, SIS.EVENT_UPDATE ]
             };
-
-            hookHttpServer = hookServer.listen(3334, function(err) {
-                if (err) {
-                    done(err);
-                }
-                ApiServer.post('/api/v1.1/hooks')
-                    .send(hook)
-                    .expect(201, done);
-            });
+            await ApiServer.post('/api/v1.1/hooks')
+                .send(hook)
+                .expect(201);
         });
 
-        after(function(done) {
-            hookHttpServer.close();
-            ApiServer.del('/api/v1.1/hooks/' + hookName)
-                .expect(200, done);
+        after(async function() {
+            await receiver.close();
+            await ApiServer.del('/api/v1.1/hooks/' + hookName)
+                .expect(200);
+            await ApiServer.del("/api/v1.1/schemas/" + hookSchema.name);
         });
 
         var hookSchema = {
@@ -184,42 +185,29 @@ describe("Hook Dispatch", function() {
             }
         };
 
-        it("Should dispatch the schema hook", function(doneCb) {
-            doneCallback = doneCb;
-            ApiServer.post("/api/v1.1/schemas")
+        it("Should dispatch the schema hook", async function() {
+            await ApiServer.del("/api/v1.1/schemas/" + hookSchema.name);
+            await ApiServer.post("/api/v1.1/schemas")
                 .set('content-type', 'application/json')
                 .send(hookSchema)
-                .end(function(err, res) { });
+                .expect(201);
+            var got = await receiver.next();
+            got.method.should.eql("POST");
+            got.body.entity_type.should.eql(SIS.SCHEMA_SCHEMAS);
+            got.body.hook.should.eql(hookName);
+            got.body.event.should.eql(SIS.EVENT_INSERT);
+            got.body.data.name.should.eql(hookSchema.name);
         });
     });
 
     describe("Forced Triggers", function() {
-                // the done callback that our listening server will callback on
-        var doneCallback = null;
-        // hook server - receives the hook events
-        var hookServer = null;
-        var hookHttpServer = null;
+        var receiver = null;
         var hookName = "test_force_trigger";
-        var hook = null;
         var entity = null;
 
-        before(function(done) {
-            var express = require('express');
-            hookServer = express();
-            // parse nested query strings (data[entity_type]=...) like Express 4 did
-            hookServer.set('query parser', 'extended');
-            hookServer.use(express.json());
-            hookServer.post('/hook', function(req, res) {
-                should.exist(req.body);
-                req.body.entity_type.should.eql("test_hook_trigger");
-                req.body.hook.should.eql(hookName);
-                req.body.event.should.eql(SIS.EVENT_UPDATE);
-                req.body.data.should.eql(req.body.old_value);
-                req.body.data.should.eql(entity);
+        before(async function() {
+            receiver = await startReceiver(3335, function(req, res) {
                 res.send("ok");
-                if (doneCallback) {
-                    doneCallback();
-                }
             });
 
             var schema = {
@@ -231,12 +219,7 @@ describe("Hook Dispatch", function() {
                 }
             };
 
-            entity = {
-                name: "Forced Trigger",
-                num: 1001
-            };
-
-            hook = {
+            var hook = {
                 "name" : hookName,
                 _sis : { "owner" : [ "Test" ] },
                 "entity_type" : "test_hook_trigger",
@@ -247,80 +230,38 @@ describe("Hook Dispatch", function() {
                 "events": [ SIS.EVENT_UPDATE ]
             };
 
-            hookHttpServer = hookServer.listen(3335, function(err) {
-                if (err) {
-                    done(err);
-                    return;
-                }
-
-                function postCb(err, res) {
-                    if (err) {
-                        done(err);
-                        return;
-                    }
-                    entity = res.body;
-                    ApiServer.post('/api/v1.1/hooks')
-                        .send(hook)
-                        .expect(201, done);
-                }
-
-                // nuke schema
-                ApiServer.del("/api/v1.1/schemas/test_hook_trigger")
-                .end(function() {
-                    ApiServer.post("/api/v1.1/schemas").send(schema)
-                    .expect(201, function(err, res) {
-                        if (err) {
-                            done(err);
-                            return;
-                        }
-                        ApiServer.post("/api/v1.1/entities/test_hook_trigger")
-                        .send(entity).expect(201, postCb);
-                    });
-                });
-            });
+            // nuke schema
+            await ApiServer.del("/api/v1.1/schemas/test_hook_trigger");
+            await ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
+            entity = (await ApiServer.post("/api/v1.1/entities/test_hook_trigger")
+                .send({ name: "Forced Trigger", num: 1001 }).expect(201)).body;
+            await ApiServer.post('/api/v1.1/hooks')
+                .send(hook)
+                .expect(201);
         });
 
-        after(function(done) {
-            hookHttpServer.close();
-            ApiServer.del("/api/v1.1/schemas/test_hook_trigger")
-            .expect(200, function(err, res) {
-                if (err) {
-                    done(err);
-                    return;
-                }
-                ApiServer.del('/api/v1.1/hooks/' + hookName)
-                    .expect(200, done);
-            });
+        after(async function() {
+            await receiver.close();
+            await ApiServer.del("/api/v1.1/schemas/test_hook_trigger")
+                .expect(200);
+            await ApiServer.del('/api/v1.1/hooks/' + hookName)
+                .expect(200);
         });
 
-        it("Should trigger the hook", function(doneCb) {
-            var count = 0;
-            function d(err) {
-                if (err) {
-                    doneCb(err);
-                    return;
-                }
-                count++;
-                if (count === 2) {
-                    doneCb();
-                }
-            }
-            doneCallback = d;
-            ApiServer.post("/api/v1.1/hooks/trigger/test_hook_trigger/" + entity._id)
-            .set('content-type', 'application/json')
-            .expect(200, function(err, res) {
-                if (err) {
-                    doneCallback = null;
-                    doneCb(err);
-                    return;
-                }
-                should.exist(res.body.message);
-                should.exist(res.body.type);
-                res.body.type.should.eql("test_hook_trigger");
-                should.exist(res.body.entity);
-                res.body.entity.should.eql(entity);
-                d();
-            });
+        it("Should trigger the hook", async function() {
+            var res = await ApiServer.post("/api/v1.1/hooks/trigger/test_hook_trigger/" + entity._id)
+                .set('content-type', 'application/json')
+                .expect(200);
+            should.exist(res.body.message);
+            res.body.type.should.eql("test_hook_trigger");
+            res.body.entity.should.eql(entity);
+            // the hook gets the entity as both the new and the old value
+            var got = await receiver.next();
+            got.body.entity_type.should.eql("test_hook_trigger");
+            got.body.hook.should.eql(hookName);
+            got.body.event.should.eql(SIS.EVENT_UPDATE);
+            got.body.data.should.eql(got.body.old_value);
+            got.body.data.should.eql(entity);
         });
     });
 

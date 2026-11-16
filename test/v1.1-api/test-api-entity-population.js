@@ -2,7 +2,6 @@ describe('@API @V1.1API - Entity Population API', function() {
     "use strict";
 
     var should = require('should');
-    var async = require('async');
 
     var SIS = require("../../util/constants");
 
@@ -10,15 +9,13 @@ describe('@API @V1.1API - Entity Population API', function() {
 
     var ApiServer = new TestUtil.TestServer();
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) { return done(e); }
-            ApiServer.becomeSuperUser(done);
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
     describe("Populate entities", function() {
@@ -59,147 +56,92 @@ describe('@API @V1.1API - Entity Population API', function() {
 
         var schemas = [schema1, schema2, schema3];
 
-        var addSchema = function(schema, callback) {
-            ApiServer.del('/api/v1.1/schemas/' + schema.name)
-            .end(function() {
-                ApiServer.post('/api/v1.1/schemas')
-                    .send(schema).expect(201, callback);
-            });
-
-        };
-
-        var deleteSchema = function(name, callback) {
-            ApiServer.del('/api/v1.1/schemas/' + name)
-                .expect(200, callback);
-        };
-
-        before(function(done) {
+        before(async function() {
             // setup the schemas
-            async.map(schemas, addSchema, function(err, res) {
-                if (err) { return done(err, res); }
-
-                var createEntity = function(i) {
-                    if (i >= entities.length) {
-                        return done();
-                    }
-                    if (i > 0) {
-                        // assign _id of the previous entity
-                        entities[i][1].ref_field = entities[i - 1][1]._id;
-                    }
-                    ApiServer.post("/api/v1.1/entities/" + entities[i][0])
-                        .set("Content-Type", "application/json")
-                        .query("populate=false")
-                        .send(entities[i][1])
-                        .expect(201, function(err, result) {
-                            if (err) { return done(err, result); }
-                            result = result.body;
-                            entities[i][1] = result;
-                            // chain
-                            createEntity(i + 1);
-                        });
-                };
-                createEntity(0);
-            });
+            await Promise.all(schemas.map(async function(schema) {
+                await ApiServer.del('/api/v1.1/schemas/' + schema.name);
+                await ApiServer.post('/api/v1.1/schemas').send(schema).expect(201);
+            }));
+            for (var i = 0; i < entities.length; ++i) {
+                if (i > 0) {
+                    // assign _id of the previous entity
+                    entities[i][1].ref_field = entities[i - 1][1]._id;
+                }
+                entities[i][1] = (await ApiServer.post("/api/v1.1/entities/" + entities[i][0])
+                    .set("Content-Type", "application/json")
+                    .query("populate=false")
+                    .send(entities[i][1])
+                    .expect(201)).body;
+            }
         });
 
-        after(function(done) {
-            var names = schemas.map(function(s) { return s.name; });
-            async.map(names, deleteSchema, done);
+        after(async function() {
+            await Promise.all(schemas.map(function(s) {
+                return ApiServer.del('/api/v1.1/schemas/' + s.name).expect(200);
+            }));
         });
 
-        function stripSisFields(obj) {
-            return obj;
-        }
-
-        function shouldEql(obj1, obj2) {
-            stripSisFields(obj1).should.eql(stripSisFields(obj2));
-        }
-
-        it("Should populate test_pop_schema_2 ref_field", function(done) {
+        it("Should populate test_pop_schema_2 ref_field", async function() {
             // test it with the GET /
-            ApiServer.get("/api/v1.1/entities/test_pop_schema_3")
+            var res = (await ApiServer.get("/api/v1.1/entities/test_pop_schema_3")
                 .set('Content-Type', 'application/json')
-                .expect(200, function(err, res) {
-                    if (err) { return done(err, res); }
-                    res = res.body[0];
-                    should.exist(res);
-                    should.exist(res.stuff);
-                    res.stuff.should.eql("ps3 stuff");
-                    should.exist(res.ref_field);
-                    //res.ref_field.should.eql(entities[1][1]);
-                    shouldEql(res.ref_field, entities[1][1]);
-                    done();
-                });
+                .expect(200)).body[0];
+            should.exist(res);
+            should.exist(res.stuff);
+            res.stuff.should.eql("ps3 stuff");
+            should.exist(res.ref_field);
+            res.ref_field.should.eql(entities[1][1]);
         });
 
-        it("Should populate test_pop_schema_1 ref_field", function(done) {
-            ApiServer.get("/api/v1.1/entities/test_pop_schema_2/" + entities[1][1]._id)
+        it("Should populate test_pop_schema_1 ref_field", async function() {
+            var res = (await ApiServer.get("/api/v1.1/entities/test_pop_schema_2/" + entities[1][1]._id)
                 .set("Content-Type", "application/json")
-                .expect(200, function(err, res) {
-                    if (err) { return done(err, res); }
-                    res = res.body;
-                    should.exist(res);
-                    should.exist(res.type);
-                    res.type.should.eql("ps2_type");
-                    should.exist(res.ref_field);
-                    //res.ref_field.should.eql(entities[0][1]);
-                    shouldEql(res.ref_field, entities[0][1]);
-                    done();
-                });
+                .expect(200)).body;
+            should.exist(res);
+            should.exist(res.type);
+            res.type.should.eql("ps2_type");
+            should.exist(res.ref_field);
+            res.ref_field.should.eql(entities[0][1]);
         });
 
-        it("Should not populate test_pop_schema_2 ref_field", function(done) {
+        it("Should not populate test_pop_schema_2 ref_field", async function() {
             // test it with the GET /
-            ApiServer.get("/api/v1.1/entities/test_pop_schema_3")
+            var res = (await ApiServer.get("/api/v1.1/entities/test_pop_schema_3")
                 .query("populate=false")
                 .set('Content-Type', 'application/json')
-                .expect(200, function(err, res) {
-                    if (err) { return done(err, res); }
-                    res = res.body[0];
-                    should.exist(res);
-                    res.should.eql(entities[2][1]);
-                    done();
-                });
+                .expect(200)).body[0];
+            should.exist(res);
+            res.should.eql(entities[2][1]);
         });
 
-        it("Should not populate test_pop_schema_1 ref_field", function(done) {
-            ApiServer.get("/api/v1.1/entities/test_pop_schema_2/" + entities[1][1]._id)
+        it("Should not populate test_pop_schema_1 ref_field", async function() {
+            var res = (await ApiServer.get("/api/v1.1/entities/test_pop_schema_2/" + entities[1][1]._id)
                 .query("populate=false")
                 .set("Content-Type", "application/json")
-                .expect(200, function(err, res) {
-                    if (err) { return done(err, res); }
-                    res = res.body;
-                    should.exist(res);
-                    res.should.eql(entities[1][1]);
-                    done();
-                });
+                .expect(200)).body;
+            should.exist(res);
+            res.should.eql(entities[1][1]);
         });
 
-        it("Should not update test_pop_schema_1 with a bad ref", function(done) {
-            var entity = entities[1][1];
+        it("Should not update test_pop_schema_2 with a bad ref", async function() {
             // clone
-            entity = JSON.parse(JSON.stringify(entity));
+            var entity = JSON.parse(JSON.stringify(entities[1][1]));
+            // a test_pop_schema_3 entity where a test_pop_schema_1 one belongs
             entity.ref_field = entities[2][1]._id;
             // try to update
-            ApiServer.put("/api/v1.1/entities/test_pop_schema_2/" + entity._id)
+            await ApiServer.put("/api/v1.1/entities/test_pop_schema_2/" + entity._id)
                 .set("Content-Type", "application/json")
                 .send(entity)
-                .expect(400, function(err, res) {
-                    res.status.should.eql(400);
-                    done();
-                });
+                .expect(400);
         });
 
-        it("Should not add test_pop_schema_1 with a bad ref", function(done) {
+        it("Should not add test_pop_schema_2 with a bad ref", async function() {
             var entity = {"ps2_name" : "ps2.bad", "type" : "ps2_type.bad"};
             entity.ref_field = entities[2][1]._id;
-            ApiServer.post("/api/v1.1/entities/test_pop_schema_2")
-                        .set("Content-Type", "application/json")
-                        .send(entity)
-                        .expect(400, function(err, res) {
-                            res.status.should.eql(400);
-                            done();
-                        });
+            await ApiServer.post("/api/v1.1/entities/test_pop_schema_2")
+                .set("Content-Type", "application/json")
+                .send(entity)
+                .expect(400);
         });
     });
 });

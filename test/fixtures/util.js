@@ -125,22 +125,7 @@ function TestServer() {
             result.set("x-auth-token", this.authToken);
         }
         result.set('Accept', 'application/json');
-        // native-promise versions of the supertest callbacks (was bluebird promisifyAll)
-        result.endAsync = function() {
-            var req = this;
-            return new Promise(function(resolve, reject) {
-                req.end(function(err, res) { if (err) { reject(err); } else { resolve(res); } });
-            });
-        };
-        result.expectAsync = function() {
-            var req = this;
-            var args = Array.prototype.slice.call(arguments);
-            return new Promise(function(resolve, reject) {
-                req.expect.apply(req, args.concat([function(err, res) {
-                    if (err) { reject(err); } else { resolve(res); }
-                }]));
-            });
-        };
+        // supertest requests are thenable: await them
         return result;
     };
 
