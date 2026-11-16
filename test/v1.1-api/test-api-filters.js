@@ -2,7 +2,6 @@ describe('@API @V1.1API - Filtering API', function() {
     "use strict";
 
     var should = require('should');
-    var async = require('async');
 
     var SIS = require("../../util/constants");
 
@@ -30,60 +29,40 @@ describe('@API @V1.1API - Filtering API', function() {
         return result;
     };
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) { return done(e); }
-            ApiServer.becomeSuperUser(function(e) {
-                if (e) { return done(e); }
-                ApiServer.del('/api/v1.1/schemas/' + schema.name)
-                .end(function() {
-                    ApiServer.post('/api/v1.1/schemas')
-                    .send(schema).expect(201, function(e) {
-                        if (e) { return done(e); }
-                        var items = createItems(0, NUM_ITEMS);
-                        ApiServer.post("/api/v1.1/entities/" + schema.name)
-                        .send(items)
-                        .expect(200, function(err, res) {
-                            should.not.exist(err);
-                            res.body.success.length.should.eql(NUM_ITEMS);
-                            res.body.success.forEach(function(i) {
-                                should.exist(i._id);
-                            });
-                            done();
-                        });
-                    });
-                });
-            });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
+        await ApiServer.del('/api/v1.1/schemas/' + schema.name);
+        await ApiServer.post('/api/v1.1/schemas').send(schema).expect(201);
+        var res = await ApiServer.post("/api/v1.1/entities/" + schema.name)
+            .send(createItems(0, NUM_ITEMS))
+            .expect(200);
+        res.body.success.length.should.eql(NUM_ITEMS);
+        res.body.success.forEach(function(i) {
+            should.exist(i._id);
         });
     });
 
-    var runQuery = function(queryObj, numExpected, done) {
-        ApiServer.get("/api/v1.1/entities/" + schema.name)
-        .query({ q : JSON.stringify(queryObj) }).expect(200, function(err, res) {
-            should.not.exist(err);
-            res = res.body;
-            res.length.should.eql(numExpected);
-            done();
-        });
+    var runQuery = async function(queryObj, numExpected) {
+        var res = await ApiServer.get("/api/v1.1/entities/" + schema.name)
+            .query({ q : JSON.stringify(queryObj) }).expect(200);
+        res.body.length.should.eql(numExpected);
     };
 
-    it("Should fetch all objects with $gte", function(done) {
-        var query = { num : { $gte : 0 }};
-        runQuery(query, NUM_ITEMS, done);
+    it("Should fetch all objects with $gte", async function() {
+        await runQuery({ num : { $gte : 0 }}, NUM_ITEMS);
     });
 
-    it("Should fetch all objects where b is false", function(done) {
-        var query = { b : false };
-        runQuery(query, NUM_ITEMS / 3, done);
+    it("Should fetch all objects where b is false", async function() {
+        await runQuery({ b : false }, NUM_ITEMS / 3);
     });
 
-    it("Should fetch all objects with $exists", function(done) {
-        var queryObj = { 'str' : { '$exists' : true }};
-        runQuery(queryObj, NUM_ITEMS, done);
+    it("Should fetch all objects with $exists", async function() {
+        await runQuery({ 'str' : { '$exists' : true }}, NUM_ITEMS);
     });
 
 

@@ -16,11 +16,9 @@ describe('@API @V1.1API - Bad requests', function() {
     var url = "/api/v1.1/entities/" + schema.name;
     var entity = { name : "keep_me", entity_id : "x1", type : schema.name };
 
-    before(function(done) {
-        ApiServer.start(function(err) {
-            if (err) { return done(err); }
-            ApiServer.becomeSuperUser(done);
-        });
+    before(async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
     });
 
     before(async function() {
@@ -33,8 +31,8 @@ describe('@API @V1.1API - Bad requests', function() {
         await ApiServer.del("/api/v1.1/schemas/" + schema.name).expect(200);
     });
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
     function expectInvalid(res) {

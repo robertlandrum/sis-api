@@ -1,6 +1,6 @@
 "use strict";
 
-var async = require('async');
+var P = require('../../util/promises');
 var TestUtil = require('./util');
 
 var genUser = function(name, defaults) {
@@ -86,39 +86,27 @@ var createUsers = function() {
 };
 
 module.exports.createUsers = createUsers;
-// recreate users
+// recreate users.  The helpers here resolve when done - and call callback
+// if one is given.
 module.exports.initUsers = function(ApiServer, token, users, callback) {
-    var names = Object.keys(users);
-    async.parallel(names.map(function(name) {
+    return P.nodeify(Promise.all(Object.keys(users).map(async function(name) {
         // delete user
-        return function(cb) {
-            ApiServer.del('/api/v1.1/users/' + name, token)
-            .end(function(err, res) {
-                if (res.status == 404 || res.status == 200) {
-                    var user = users[name];
-                    ApiServer.post('/api/v1.1/users', token)
-                        .send(user)
-                        .expect(201, cb);
-                } else {
-                    return cb("unexpected del status : " + res.status);
-                }
-            });
-        };
-    }), callback);
+        var res = await ApiServer.del('/api/v1.1/users/' + name, token);
+        if (res.status != 404 && res.status != 200) {
+            throw "unexpected del status : " + res.status;
+        }
+        await ApiServer.post('/api/v1.1/users', token)
+            .send(users[name])
+            .expect(201);
+    })), callback);
 };
 
+// sets userToTokens[name] to a session token of each user
 module.exports.createTempTokens = function(ApiServer, userToTokens, users, callback) {
-    var names = Object.keys(users);
-    async.parallel(names.map(function(name) {
-        return function(cb) {
-            var user = users[name];
-            ApiServer.getTempToken(user.name, user.pw, function(err, token) {
-                if (err) { return cb(err); }
-                userToTokens[name] = token;
-                return cb(null, true);
-            });
-        };
-    }), callback);
+    return P.nodeify(Promise.all(Object.keys(users).map(async function(name) {
+        var user = users[name];
+        userToTokens[name] = await ApiServer.getTempToken(user.name, user.pw);
+    })), callback);
 };
 
 module.exports.getAuthSchemas = function() {
@@ -165,23 +153,19 @@ module.exports.deleteSchemas = function(ApiServer, schemas, ensureExists, callba
     if (!(schemas instanceof Array)) {
         schemas = TestUtil.objectValues(schemas);
     }
-    async.map(schemas, function(schema, cb) {
+    return P.nodeify(Promise.all(schemas.map(function(schema) {
         var req = ApiServer.del("/api/v1.1/schemas/" + schema.name);
-        if (ensureExists) {
-            req = req.expect(200);
-        }
-        req.end(cb);
-    }, callback);
+        return ensureExists ? req.expect(200) : req;
+    })), callback);
 };
 
 module.exports.addSchemas = function(ApiServer, schemas, callback) {
     if (!(schemas instanceof Array)) {
         schemas = TestUtil.objectValues(schemas);
     }
-    async.map(schemas, function(schema, cb) {
-        ApiServer.post("/api/v1.1/schemas").send(schema)
-            .expect(201, cb);
-    }, callback);
+    return P.nodeify(Promise.all(schemas.map(function(schema) {
+        return ApiServer.post("/api/v1.1/schemas").send(schema).expect(201);
+    })), callback);
 };
 
 module.exports.createAuthEntities = function() {
