@@ -341,6 +341,25 @@ describe('User Manager', function() {
             }
         });
 
+        it("accepts email addresses with long top level domains and plus tags", async function() {
+            var emails = ["ops@acme.museum", "ops@corp.engineering", "first.last@mail.corp.example",
+                          "ops+sis@corp.com", "o-p_s@corp-x.io"];
+            for (var i = 0; i < emails.length; i++) {
+                var name = "edge_email_" + i;
+                var added = await userManager.add({ name : name, email : emails[i], pw : "p", roles : { } },
+                                                  { user : superUser });
+                added.email.should.eql(emails[i]);
+                await userManager.delete(name, { user : superUser });
+            }
+        });
+
+        it("rejects email addresses that are not addresses", async function() {
+            for (var email of ["ops@x.c", "bad@", "@corp.com", "not-an-email", "ops@corp", "o ps@corp.com"]) {
+                await expectError(userManager.add({ name : "edge_email_bad", email : email, pw : "p", roles : { } },
+                                                  { user : superUser }), 400, /email/);
+            }
+        });
+
         it("ends the sessions of a user", async function() {
             var before = (await userManager.getById(edgeUser.name, { lean : true }))[SIS.FIELD_SESSION_GEN] || 0;
             (await userManager.endSessions(edgeUser.name)).should.eql(edgeUser.name);
