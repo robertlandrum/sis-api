@@ -172,4 +172,8 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   regex or optional `:id?` (the `:version` param is validated via `app.param`).
 - `lodash` v4 and `async` v3 are the utility libs; keep `"use strict"` at the top of each
   module and match the style of the surrounding code (it still uses `var`).
+- Require modules at the top of a module, never inside a function, ahead of the switch to
+  ES module imports. The local modules require each other without cycles - keep it that
+  way. Do not read the configuration (`nconf`) while a module loads; loggers from
+  `logger.createLogger` are made when first used, so creating them at load is fine.
 - API docs live in `docs/*.md`; `samples/` holds example schema/entity/hook JSON payloads.
