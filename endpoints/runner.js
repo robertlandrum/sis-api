@@ -1,10 +1,13 @@
 'use strict';
 
-var nconf = require('nconf');
-var P = require("../util/promises");
 var vm = require("vm");
-var SIS = require("../util/constants");
 var clone = require("clone");
+var csvStringify = require('csv-stringify');
+var yaml = require('js-yaml');
+var P = require("../util/promises");
+var SIS = require("../util/constants");
+var createScriptManager = require("../util/script-manager");
+var createHieraManager = require("../util/hiera-manager");
 var LOGGER = require("../util/logger").createLogger({
     name : "ScriptRunner"
 });
@@ -48,8 +51,8 @@ function async(gen) {
 class ScriptRunner {
     constructor(schemaManager) {
         this.schemaManager = schemaManager;
-        this.manager = require("../util/script-manager")(schemaManager);
-        this.hieraManager = require("../util/hiera-manager")(schemaManager);
+        this.manager = createScriptManager(schemaManager);
+        this.hieraManager = createHieraManager(schemaManager);
         this.scriptCache = { };
     }
 
@@ -76,8 +79,8 @@ class ScriptRunner {
             req : req,
             Promise : Promise,
             // keep the csv.stringify shape that user scripts expect
-            csv : { stringify : require('csv-stringify') },
-            yaml : require('js-yaml'),
+            csv : { stringify : csvStringify },
+            yaml : yaml,
             async : async
         };
         return vm.createContext(clone(ctx));

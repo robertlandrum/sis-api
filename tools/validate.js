@@ -1,10 +1,11 @@
 "use strict";
 
+// validates a schema - and an entity against it - without a database
 var mongoose = require('mongoose');
 var nconf = require('nconf');
-var SIS = require('../util/constants');
 var fs = require('fs');
 var config = require('../config');
+var createSchemaManager = require('../util/schema-manager');
 
 if (process.argv.length < 3) {
     console.log("Require a schema JSON file with optional entity JSON file.");
@@ -15,7 +16,7 @@ nconf.env('__').argv();
 nconf.defaults(config);
 
 var appConfig = nconf.get('app') || {};
-var schemaManager = require('../util/schema-manager')(mongoose, appConfig);
+var schemaManager = createSchemaManager(mongoose, appConfig);
 
 // get the info for a user.
 var schemaModel = null;
@@ -33,25 +34,27 @@ try {
     process.exit(1);
 }
 
-if (process.argv.length >= 4) {
-    // validate an entity against the schema
+// validate an entity against the schema
+async function validateEntity(entityFile) {
+    var entity;
     try {
-        var entityFile = process.argv[3];
-        var entity = JSON.parse(fs.readFileSync(entityFile, 'utf8'));
-        var obj = new schemaModel(entity);
-        obj.validate(function(err) {
-            if (err) {
-                console.log("Entity is invalid. " + err);
-                process.exit(1);
-            } else {
-                console.log("Entity is valid.");
-                process.exit(0);
-            }
-        });
+        entity = JSON.parse(fs.readFileSync(entityFile, 'utf8'));
     } catch (ex) {
-        console.log("Error validating entity. " + ex);
+        console.log("Error reading the entity. " + ex);
         process.exit(1);
     }
+    try {
+        await new schemaModel(entity).validate();
+    } catch (err) {
+        console.log("Entity is invalid. " + err);
+        process.exit(1);
+    }
+    console.log("Entity is valid.");
+    process.exit(0);
+}
+
+if (process.argv.length >= 4) {
+    validateEntity(process.argv[3]);
 } else {
     console.log("Schema is valid.");
     process.exit(0);

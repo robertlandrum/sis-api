@@ -1,8 +1,10 @@
 'use strict';
 
-var SIS = require("../util/constants");
-var webUtil = require("./webutil");
 var nconf = require("nconf");
+var SIS = require("../util/constants");
+var createCommitManager = require("../util/commit-manager");
+var createHookManager = require("../util/hook-manager");
+var webUtil = require("./webutil");
 
 var CHUNK_SIZE = 100;
 
@@ -49,13 +51,13 @@ class ApiController {
             this.type = opts[SIS.OPT_TYPE];
         }
         if (opts[SIS.OPT_LOG_COMMTS]) {
-            this.commitManager = require("../util/commit-manager")(this.sm);
+            this.commitManager = createCommitManager(this.sm);
             if (opts[SIS.OPT_ID_FIELD]) {
                 this.commitManager.idField = opts[SIS.OPT_ID_FIELD];
             }
         }
         if (opts[SIS.OPT_FIRE_HOOKS]) {
-            this.hm = require('../util/hook-manager')(this.sm);
+            this.hm = createHookManager(this.sm);
         }
         this.getterReadPref = nconf.get("app:get_read_pref");
     }

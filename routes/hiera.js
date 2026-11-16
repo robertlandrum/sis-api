@@ -2,6 +2,7 @@
 
 var ApiController = require("./apicontroller");
 var SIS = require("../util/constants");
+var createHieraManager = require("../util/hiera-manager");
 
 // Hiera controller
 class HieraController extends ApiController {
@@ -13,7 +14,7 @@ class HieraController extends ApiController {
         opts[SIS.OPT_USE_AUTH] = config[SIS.OPT_USE_AUTH];
         SIS.UTIL_MERGE_SHALLOW(opts, config);
         super(opts);
-        this.manager = require("../util/hiera-manager")(this.sm, opts);
+        this.manager = createHieraManager(this.sm, opts);
     }
 
     // The GET/:id request needs to send only the hiera object back

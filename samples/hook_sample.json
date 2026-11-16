@@ -1,6 +1,6 @@
 { 
     "name" : "sample_hook_name", 
-    "owner" : "hook_owner",
+    "_sis" : { "owner" : ["hook_owner"] },
     "entity_type" : "sample",
     "target" : {
         "action" : "POST",

@@ -1,6 +1,6 @@
 { 
     "name" : "schema_hook_name", 
-    "owner" : "hook_owner",
+    "_sis" : { "owner" : ["hook_owner"] },
     "entity_type" : "sis_schemas",
     "target" : {
         "action" : "POST",

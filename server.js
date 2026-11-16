@@ -1,27 +1,33 @@
 "use strict";
 
+var cluster = require("cluster");
+var os = require("os");
 var express = require('express');
 var mongoose = require('mongoose');
-var logger = require('./util/logger');
 var nconf = require("nconf");
-var app = null;
+var passport = require("passport");
+var logger = require('./util/logger');
+var SIS = require("./util/constants");
+var createSchemaManager = require('./util/schema-manager');
+var sessionManagerModule = require("./util/session-manager");
+var hookManagerModule = require('./util/hook-manager');
+var webUtil = require("./routes/webutil");
 
 // routes we want to include
 var routes = [
-    'schemas',
-    'entities',
-    'hiera',
-    'hooks',
-    'users',
-    'tokens',
-    'info',
-    'scripts',
-    'endpoints'
+    require('./routes/schemas'),
+    require('./routes/entities'),
+    require('./routes/hiera'),
+    require('./routes/hooks'),
+    require('./routes/users'),
+    require('./routes/tokens'),
+    require('./routes/info'),
+    require('./routes/scripts'),
+    require('./routes/endpoints')
 ];
 
 // Throws if the app config has settings that cannot work together
 var validateAppConfig = function(appConfig) {
-    var SIS = require("./util/constants");
     appConfig = appConfig || { };
     if (appConfig[SIS.OPT_AUTH_READS] && !appConfig[SIS.OPT_USE_AUTH]) {
         throw new Error("app." + SIS.OPT_AUTH_READS + " requires app." +
@@ -33,12 +39,11 @@ var validateAppConfig = function(appConfig) {
 // missing or invalid.  Read-only servers only need the public keys; they
 // mint tokens only if a private key is also present.
 var createSessionManager = function(appConfig, logger) {
-    var SIS = require("./util/constants");
     appConfig = appConfig || { };
     if (!appConfig[SIS.OPT_USE_AUTH]) {
         return null;
     }
-    return require("./util/session-manager")(appConfig[SIS.OPT_JWT], {
+    return sessionManagerModule(appConfig[SIS.OPT_JWT], {
         requireSigningKey : !appConfig[SIS.OPT_READONLY],
         logger : logger
     });
@@ -59,7 +64,6 @@ var listen = function(app, port) {
 };
 
 var startServer = function(callback) {
-    var SIS = require("./util/constants");
     var LOGGER = logger.createLogger({
         name : "SISServer"
     });
@@ -73,8 +77,6 @@ var startServer = function(callback) {
         next();
     };
 
-    var passport = require("passport");
-    var webUtil = require("./routes/webutil");
     var app = express();
 
     app.use(logger.loggingMiddleware());
@@ -128,7 +130,7 @@ var startServer = function(callback) {
             app.set(k, appConfig[k]);
         }
         app.locals.closeListeners = [];
-        var schemaManager = require('./util/schema-manager')(mongoose, appConfig);
+        var schemaManager = createSchemaManager(mongoose, appConfig);
         await schemaManager.bootstrapEntitySchemas();
         passport.use(webUtil.createTokenStrategy(schemaManager, sessionManager));
         passport.use(webUtil.createUserPassStrategy(schemaManager, appConfig));
@@ -154,8 +156,7 @@ var startServer = function(callback) {
         });
 
         // setup the routes
-        routes.forEach(function(routeName) {
-            var route = require("./routes/" + routeName);
+        routes.forEach(function(route) {
             route.setup(app, cfg);
         });
 
@@ -226,9 +227,8 @@ function main() {
     };
 
     if (nconf.get("app:use_cluster")) {
-        var cluster = require("cluster");
         if (cluster.isPrimary) {
-            var cpuCount = require('os').cpus().length;
+            var cpuCount = os.cpus().length;
             var worker = null;
             // Create a worker for each CPU
             for (var i = 0; i < cpuCount; i += 1) {
@@ -278,7 +278,7 @@ module.exports.createSessionManager = createSessionManager;
 // database connection can be closed
 module.exports.stopServer = function(server, callback) {
     server.close(async function(err) {
-        await require('./util/hook-manager').lookupsDone();
+        await hookManagerModule.lookupsDone();
         callback(err);
     });
 };
