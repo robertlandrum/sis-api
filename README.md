@@ -80,10 +80,13 @@ db__url="mongodb://localhost:27018/sis-test" npm test
 ```
 
 To run a single spec, list `test/init-tests.js` first (it starts the shared
-server and seeds a superuser) followed by the target spec:
+server and seeds a superuser) followed by the target spec. `--no-config` keeps
+mocha from also running every spec `.mocharc.yml` lists, so pass the preload and
+`--exit` it would have:
 
 ```bash
-db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --timeout 60000 \
+db__url="mongodb://localhost/sis-test" ./node_modules/.bin/mocha --no-config \
+  --require scripts/gen-build-info.js --timeout 60000 --exit \
   test/init-tests.js test/v1.1-api/test-api-entities.js
 ```
 
