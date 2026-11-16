@@ -109,12 +109,15 @@ ScriptRunner.prototype.handleRequest = function(req) {
         if (Array.isArray(err)) {
             return Promise.reject(err);
         }
-        var str = err + "";
-        if (err.stack) {
-            str += " : " + err.stack;
-        }
-        err = SIS.ERR_INTERNAL(str);
-        return Promise.reject(err);
+        LOGGER.error({ err : err, endpoint : endpoint }, "Script error");
+        // the client gets the error and where in the script it happened,
+        // but not the stack frames of the server
+        var scriptLines = String((err && err.stack) || "").split("\n").filter(function(line) {
+            return line.indexOf(endpoint + ":") !== -1;
+        }).map(function(line) {
+            return line.trim();
+        });
+        return Promise.reject(SIS.ERR_INTERNAL([String(err)].concat(scriptLines).join("\n")));
     });
 };
 

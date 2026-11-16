@@ -64,6 +64,13 @@ Promise.resolve(mongoose.connect(nconf.get('db').url, opts))
     process.send({ type : SIS.EP_ERROR, data : err });
 });
 
+// a rejection a script leaves unhandled is the script's bug - log it rather
+// than let it end the process every endpoint shares
+var LOGGER = require("../util/logger").createLogger({ name : "ScriptProcess" });
+process.on("unhandledRejection", function(reason) {
+    LOGGER.error({ err : reason }, "Unhandled rejection in a script");
+});
+
 // need to also register the disconnect handler
 process.on("disconnect", function() {
     // this is not ok.

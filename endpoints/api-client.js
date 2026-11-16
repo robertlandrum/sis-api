@@ -1,6 +1,7 @@
 "use strict";
 
 var webUtil = require("../routes/webutil");
+var P = require("../util/promises");
 var createEntityManager = require("../util/entity-manager");
 var _ = require("lodash");
 
@@ -31,18 +32,25 @@ function GenericEp(hieraManager) {
 }
 
 function EntityEp(name, schemaManager) {
-    var mgrPromise = schemaManager.getById(name, { lean : true })
-        .then(function(schema) {
-            var model = schemaManager.getEntityModel(schema);
-            return createEntityManager(model, schema, { });
-        });
+    // looked up on first use - a client for a schema that does not exist
+    // only fails the calls made on it
+    var mgr = null;
+    var getManager = function() {
+        if (!mgr) {
+            mgr = schemaManager.getById(name, { lean : true }).then(function(schema) {
+                var model = schemaManager.getEntityModel(schema);
+                return createEntityManager(model, schema, { });
+            });
+        }
+        return mgr;
+    };
 
     this.get = function(id, query) {
         query = query || { };
         var rq = webUtil.parseQuery(query, '1.1', false);
         var populate = webUtil.parsePopulate(query);
         var lean = false;
-        return mgrPromise.then(function(em) {
+        return getManager().then(function(em) {
             lean = em.model.schema._sis_defaultpaths.length === 0;
             var options = { read : "nearest" };
             options.lean = lean;
@@ -70,10 +78,10 @@ function EntityEp(name, schemaManager) {
         var rq = webUtil.parseQuery(query, '1.1', false);
         var populate = webUtil.parsePopulate(query);
         var lean = false;
-        return mgrPromise.then(function(mgr) {
+        return getManager().then(function(mgr) {
             lean = mgr.model.schema._sis_defaultpaths.length === 0;
             return webUtil.flattenCondition(rq.query, schemaManager, mgr);
-        }).spread(function(flattenedCondition, mgr) {
+        }).then(P.spread(function(flattenedCondition, mgr) {
             var options = { read: "nearest" };
             if (rq.sort) { options.sort = rq.sort; }
             if (rq.limit) { options.limit = rq.limit; }
@@ -90,7 +98,7 @@ function EntityEp(name, schemaManager) {
             } else {
                 return mgr.getAll(flattenedCondition, options, rq.fields);
             }
-        }).then(function(result) {
+        })).then(function(result) {
             if (!lean) {
                 result = result.map(function(o) { return o.toObject(); });
             }
