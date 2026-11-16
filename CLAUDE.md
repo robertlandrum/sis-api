@@ -22,6 +22,8 @@ with the `db__url` env var (nconf reads `__` as the nested-key separator), e.g.
 - `npm test` - run the mocha suite (config in `.mocharc.yml`).
 - `npm run lint` - run eslint (flat config in `eslint.config.js`).
 - `npm run coverage` - mocha under `c8`.
+- CI: `.github/workflows/ci.yml` runs the lint and the suite on Node 22 and 24 against
+  MongoDB 7 for pushes to `develop` / `main` and every pull request.
 - `npm run build` - generate `build.json` (consumed by the `/info` endpoint).
 
 The build/test tooling was migrated off the obsolete grunt + jshint + blanket stack
