@@ -253,12 +253,12 @@ Manager.prototype.bulkAdd = async function(items, options) {
     }));
 
     var preSaved = await this._preSaveBulk(authorized);
-    memo.errors.push.apply(memo.errors, preSaved[1]);
+    memo.errors.push.apply(memo.errors, preSaved.errors);
 
     // validate against the model and queue the inserts
     var toAdd = [];
     var batch = this.model.collection.initializeUnorderedBulkOp();
-    await Promise.all(preSaved[0].map(async (res, idx) => {
+    await Promise.all(preSaved.success.map(async (res, idx) => {
         var doc = new this.model(res);
         try {
             await doc.validate();
@@ -723,7 +723,7 @@ Manager.prototype.applyPreSaveFields = function(obj) {
     obj[SIS.FIELD_SIS_META][SIS.FIELD_UPDATED_AT] = Date.now();
 };
 
-// Run _preSave on each object.  Resolves with a two element array:
+// Run _preSave on each object.  Resolves with { success, errors }:
 // the objects that passed, and errors as { err, value }
 Manager.prototype._preSaveBulk = async function(objs) {
     var errors = [];
@@ -735,7 +735,7 @@ Manager.prototype._preSaveBulk = async function(objs) {
             errors.push({ value : obj, err : err });
         }
     }));
-    return [success, errors];
+    return { success : success, errors : errors };
 };
 
 // pre add hook that is called on inserts only

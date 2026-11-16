@@ -383,12 +383,12 @@ EntityManager.prototype._addReferencesToState = function(ref, obj, idx,
     });
 };
 
-// Check the references of the objects.  Resolves with a two element array:
+// Check the references of the objects.  Resolves with { success, errors }:
 // the objects whose references exist, and errors as { err, value }
 EntityManager.prototype._preSaveBulk = async function(objs) {
     var references = this.getReferences();
     if (!references.length || !objs || !objs.length) {
-        return [objs, []];
+        return { success : objs, errors : [] };
     }
     // errors by index of the object
     var allErrors = { };
@@ -465,7 +465,7 @@ EntityManager.prototype._preSaveBulk = async function(objs) {
 
     var erroredIndeces = Object.keys(allErrors);
     if (!erroredIndeces.length) {
-        return [objs, []];
+        return { success : objs, errors : [] };
     }
     var errorValues = erroredIndeces.map(function(eIdx) {
         return allErrors[eIdx];
@@ -473,11 +473,11 @@ EntityManager.prototype._preSaveBulk = async function(objs) {
     var success = objs.filter(function(o, idx) {
         return !(idx in allErrors);
     });
-    return [success, errorValues];
+    return { success : success, errors : errorValues };
 };
 
 EntityManager.prototype._preSave = async function(obj) {
-    var errors = (await this._preSaveBulk([obj]))[1];
+    var errors = (await this._preSaveBulk([obj])).errors;
     if (errors.length) {
         throw errors[0].err;
     }

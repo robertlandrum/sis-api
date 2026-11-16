@@ -704,11 +704,11 @@ describe('Manager', function() {
                 return obj.num ? Promise.resolve(obj) : Promise.reject(SIS.ERR_BAD_REQ("zero"));
             };
             var result = await mgr._preSaveBulk([item("a", 1), item("b", 0)]);
-            result.length.should.eql(2);
-            result[0].map(function(s) { return s.name; }).should.eql(["a"]);
-            result[1].length.should.eql(1);
-            result[1][0].value.name.should.eql("b");
-            result[1][0].err[0].should.eql(400);
+            Object.keys(result).should.eql(["success", "errors"]);
+            result.success.map(function(s) { return s.name; }).should.eql(["a"]);
+            result.errors.length.should.eql(1);
+            result.errors[0].value.name.should.eql("b");
+            result.errors[0].err[0].should.eql(400);
         });
     });
 
