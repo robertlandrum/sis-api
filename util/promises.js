@@ -1,7 +1,7 @@
 "use strict";
 
 // Small native-promise helpers replacing the bluebird-specific sugar
-// (.pending / .tap / .nodeify) that SIS relied on.
+// (.pending / .nodeify) that SIS relied on.
 
 // A deferred: { promise, resolve, reject }  (was BPromise.pending()).
 exports.defer = function() {
@@ -20,12 +20,4 @@ exports.nodeify = function(promise, cb) {
     }
     promise.then(function(r) { cb(null, r); }, function(e) { cb(e); });
     return promise;
-};
-
-// Run a side effect, then pass the original value through (was .tap(fn)).
-// Use as: promise.then(tap(function(val) { ... }))
-exports.tap = function(fn) {
-    return function(val) {
-        return Promise.resolve(fn(val)).then(function() { return val; });
-    };
 };
