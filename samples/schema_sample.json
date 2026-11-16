@@ -1,6 +1,6 @@
 {
     "name" : "sample",
-    "owner" : "SIS",
+    "_sis" : { "owner" : ["SIS"] },
     "definition" : {
         "requiredField" : { "type" : "String", "required" : true },
         "uniqueNumberField" : { "type" : "Number", "unique" : true },
