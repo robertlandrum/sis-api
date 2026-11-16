@@ -2,31 +2,58 @@
 
 var webUtil = require("../routes/webutil");
 var createEntityManager = require("../util/entity-manager");
-var _ = require("lodash");
 
-function GenericEp(hieraManager) {
-    this.get = function(id, query) {
-        query = query || { };
-        var rq = webUtil.parseQuery(query, '1.1', false);
-        var options = { read : "nearest", lean : true };
-        return hieraManager.getById(id, options).then(function(obj) {
-            obj.hieradata = obj.hieradata || { };
-            var result = {};
-            result[id] = obj.hieradata;
-            return result;
-        });
+// Set options.populate to the paths of mgr the query wants populated
+async function setPopulate(query, mgr, schemaManager, options) {
+    var populate = webUtil.parsePopulate(query);
+    if (!populate) {
+        return;
+    }
+    var populateFields = await mgr.getPopulateFields(schemaManager, populate);
+    if (populateFields) {
+        options.populate = populateFields;
+    }
+}
+
+// The find options of a parsed query
+function findOptions(rq, lean) {
+    var options = { read : "nearest", lean : lean };
+    if (rq.sort) { options.sort = rq.sort; }
+    if (rq.limit) { options.limit = rq.limit; }
+    if (rq.offset) { options.skip = rq.offset; }
+    return options;
+}
+
+// Parse the query of listAll - rejecting one whose q is not a JSON object
+function parseListQuery(query) {
+    var rq = webUtil.parseQuery(query || { }, '1.1', false);
+    if (rq.query === webUtil.ERROR_QUERY) {
+        throw webUtil.invalidQueryError();
+    }
+    return rq;
+}
+
+// get and listAll of the objects of manager
+function GenericEp(manager) {
+    this.get = async function(id) {
+        return manager.getById(id, { read : "nearest", lean : true });
     };
 
-    this.listAll = function(query) {
-        query = query || { };
-        var rq = webUtil.parseQuery(query, '1.1', false);
-        var lean = true;
-        var options = { read : "nearest" };
-        if (rq.sort) { options.sort = rq.sort; }
-        if (rq.limit) { options.limit = rq.limit; }
-        if (rq.offset) { options.skip = rq.offset; }
-        options.lean = lean;
-        return hieraManager.getAll(rq.query, options, rq.fields);
+    this.listAll = async function(query) {
+        var rq = parseListQuery(query);
+        return manager.getAll(rq.query, findOptions(rq, true), rq.fields);
+    };
+}
+
+// like GenericEp, but get resolves with { id : hieradata } as the hiera API sends it
+function HieraEp(hieraManager) {
+    GenericEp.call(this, hieraManager);
+    var getEntry = this.get;
+    this.get = async function(id) {
+        var obj = await getEntry(id);
+        var result = {};
+        result[id] = obj.hieradata || { };
+        return result;
     };
 }
 
@@ -44,65 +71,29 @@ function EntityEp(name, schemaManager) {
         return mgr;
     };
 
-    this.get = function(id, query) {
-        query = query || { };
-        var rq = webUtil.parseQuery(query, '1.1', false);
-        var populate = webUtil.parsePopulate(query);
-        var lean = false;
-        return getManager().then(function(em) {
-            lean = em.model.schema._sis_defaultpaths.length === 0;
-            var options = { read : "nearest" };
-            options.lean = lean;
-            if (populate) {
-                return em.getPopulateFields(schemaManager, populate)
-                .then(function(populateFields) {
-                    if (populateFields) {
-                        options.populate = populateFields;
-                    }
-                    return em.getById(id, options);
-                });
-            } else {
-                return em.getById(id, options);
-            }
-        }).then(function(result) {
-            if (!lean) {
-                result = result.toObject();
-            }
-            return result;
-        });
+    // models with default values are not read lean, so the defaults apply
+    var isLean = function(em) {
+        return em.model.schema._sis_defaultpaths.length === 0;
     };
 
-    this.listAll = function(query) {
-        query = query || { };
-        var rq = webUtil.parseQuery(query, '1.1', false);
-        var populate = webUtil.parsePopulate(query);
-        var lean = false;
-        return getManager().then(function(mgr) {
-            lean = mgr.model.schema._sis_defaultpaths.length === 0;
-            return webUtil.flattenCondition(rq.query, schemaManager, mgr).then(function(flattenedCondition) {
-                var options = { read: "nearest" };
-                if (rq.sort) { options.sort = rq.sort; }
-                if (rq.limit) { options.limit = rq.limit; }
-                if (rq.offset) { options.skip = rq.offset; }
-                options.lean = lean;
-                if (populate) {
-                    return mgr.getPopulateFields(schemaManager, populate)
-                    .then(function(fields) {
-                        if (fields) {
-                            options.populate = fields;
-                        }
-                        return mgr.getAll(flattenedCondition, options, rq.fields);
-                    });
-                } else {
-                    return mgr.getAll(flattenedCondition, options, rq.fields);
-                }
-            });
-        }).then(function(result) {
-            if (!lean) {
-                result = result.map(function(o) { return o.toObject(); });
-            }
-            return result;
-        });
+    this.get = async function(id, query) {
+        var em = await getManager();
+        var lean = isLean(em);
+        var options = { read : "nearest", lean : lean };
+        await setPopulate(query || { }, em, schemaManager, options);
+        var result = await em.getById(id, options);
+        return lean ? result : result.toObject();
+    };
+
+    this.listAll = async function(query) {
+        var rq = parseListQuery(query);
+        var em = await getManager();
+        var lean = isLean(em);
+        var condition = await webUtil.flattenCondition(rq.query, schemaManager, em);
+        var options = findOptions(rq, lean);
+        await setPopulate(query || { }, em, schemaManager, options);
+        var result = await em.getAll(condition, options, rq.fields);
+        return lean ? result : result.map(function(o) { return o.toObject(); });
     };
 }
 
@@ -115,7 +106,7 @@ function Client(schemaManager, hieraManager) {
         }
         return epCache[name];
     };
-    this.hiera = new GenericEp(hieraManager);
+    this.hiera = new HieraEp(hieraManager);
     this.schemas = new GenericEp(schemaManager);
 }
 

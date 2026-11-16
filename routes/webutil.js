@@ -4,7 +4,6 @@ var passport = require('passport');
 var BasicStrategy = require('passport-http').BasicStrategy;
 var SIS = require("../util/constants");
 var P = require("../util/promises");
-var util = require("util");
 var _ = require("lodash");
 var isJwt = require("../util/session-manager").isJwt;
 
@@ -59,81 +58,83 @@ var getLdapVerificationFunc = function(sm, auth_config) {
         name : "_sis_ldap_auth_",
         super_user : true
     };
-    return function(user, pass, done) {
+    // Resolves with the SIS user of an account the directory accepts
+    var verify = async function(user, pass) {
         var ldapUser = bindTemplate ?
             bindTemplate.replace(/%u/g, escapeDNValue(user)) :
             (user + '@' + ud);
-        // ldapts is ESM-only, so load it lazily via dynamic import.
-        import('ldapts').then(function(ldapts) {
-            var client = new ldapts.Client(client_opts);
-            return client.bind(ldapUser, pass).then(function() {
-                // unbind - don't wait around / ignore unbind errors
-                client.unbind().catch(function() { });
-                var userObj = {
-                    name : user,
-                    email : user + '@' + ed
-                };
-                return P.nodeify(userManager.getOrCreateEmptyUser(userObj, ldapSisUser), done);
-            }, function(err) {
-                client.unbind().catch(function() { });
-                return done(SIS.ERR_BAD_CREDS("LDAP authentication failed : " + err), null);
-            });
-        }).catch(function(err) {
-            return done(SIS.ERR_INTERNAL("Unable to load LDAP client : " + err), null);
-        });
+        var client;
+        try {
+            // ldapts is ESM-only, so load it lazily via dynamic import.
+            var ldapts = await import('ldapts');
+            client = new ldapts.Client(client_opts);
+        } catch (err) {
+            throw SIS.ERR_INTERNAL("Unable to load LDAP client : " + err);
+        }
+        try {
+            await client.bind(ldapUser, pass);
+        } catch (err) {
+            throw SIS.ERR_BAD_CREDS("LDAP authentication failed : " + err);
+        } finally {
+            // unbind - don't wait around / ignore unbind errors
+            client.unbind().catch(function() { });
+        }
+        var userObj = {
+            name : user,
+            email : user + '@' + ed
+        };
+        return userManager.getOrCreateEmptyUser(userObj, ldapSisUser);
+    };
+    return function(user, pass, done) {
+        P.nodeify(verify(user, pass), done);
     };
 };
 
-// Map a missing user / token lookup (404) to bad credentials
-var notFoundToBadCreds = function(err) {
-    // an unknown token (or one whose user is gone) is bad credentials,
-    // not a missing resource
-    if (err instanceof Array && err[0] === 404) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("Invalid token."));
-    }
-    return Promise.reject(err);
-};
-
 // authorization using a JWT session token
-var _verifySessionToken = function(sessionManager, userManager, token) {
+var _verifySessionToken = async function(sessionManager, userManager, token) {
     if (!sessionManager) {
-        return Promise.reject(SIS.ERR_BAD_CREDS("Invalid token."));
+        throw SIS.ERR_BAD_CREDS("Invalid token.");
     }
-    return sessionManager.verify(token).then(function(claims) {
-        return userManager.getById(claims.sub, {lean : true}).then(function(user) {
-            // a logout or password change bumps session_gen, ending
-            // every session issued before it
-            if ((user[SIS.FIELD_SESSION_GEN] || 0) !== claims.sgen) {
-                return Promise.reject(SIS.ERR_BAD_CREDS("Session has ended."));
-            }
-            return user;
-        });
-    });
+    var claims = await sessionManager.verify(token);
+    var user = await userManager.getById(claims.sub, {lean : true});
+    // a logout or password change bumps session_gen, ending
+    // every session issued before it
+    if ((user[SIS.FIELD_SESSION_GEN] || 0) !== claims.sgen) {
+        throw SIS.ERR_BAD_CREDS("Session has ended.");
+    }
+    return user;
 };
 
 // authorization using sis_tokens (persistent tokens and temporary
 // tokens issued before the switch to JWT sessions)
-var _verifyStoredToken = function(tokenFetcher, userManager, token) {
-    return tokenFetcher.getTokenByName(token).then(function(t) {
-        // check if the token has expired
-        if (t[SIS.FIELD_EXPIRES]) {
-            var expires = t[SIS.FIELD_EXPIRES];
-            var timeLeft = expires.getTime() - Date.now();
-            if (timeLeft <= 0) {
-                // no good
-                return Promise.reject(SIS.ERR_BAD_CREDS("Token has expired."));
-            }
+var _verifyStoredToken = async function(tokenFetcher, userManager, token) {
+    var t = await tokenFetcher.getTokenByName(token);
+    // check if the token has expired
+    if (t[SIS.FIELD_EXPIRES] && t[SIS.FIELD_EXPIRES].getTime() - Date.now() <= 0) {
+        throw SIS.ERR_BAD_CREDS("Token has expired.");
+    }
+    return userManager.getById(t[SIS.FIELD_USERNAME], {lean : true});
+};
+
+// Resolves with the user of the token
+var verifySisToken = async function(sm, sessionManager, token) {
+    var userManager = sm.auth[SIS.SCHEMA_USERS];
+    try {
+        return await (isJwt(token) ?
+            _verifySessionToken(sessionManager, userManager, token) :
+            _verifyStoredToken(sm.tokenFetcher, userManager, token));
+    } catch (err) {
+        // an unknown token (or one whose user is gone) is bad credentials,
+        // not a missing resource
+        if (err instanceof Array && err[0] === 404) {
+            throw SIS.ERR_BAD_CREDS("Invalid token.");
         }
-        return userManager.getById(t[SIS.FIELD_USERNAME], {lean : true});
-    });
+        throw err;
+    }
 };
 
 var _verifySisToken = function(sm, sessionManager, token, done) {
-    var userManager = sm.auth[SIS.SCHEMA_USERS];
-    var p = isJwt(token) ?
-        _verifySessionToken(sessionManager, userManager, token) :
-        _verifyStoredToken(sm.tokenFetcher, userManager, token);
-    return P.nodeify(p.catch(notFoundToBadCreds), done);
+    P.nodeify(verifySisToken(sm, sessionManager, token), done);
 };
 
 // Extract the API token from x-auth-token or Authorization: Bearer.
@@ -183,30 +184,29 @@ module.exports.createUserPassStrategy = function(sm, config) {
 };
 
 // The passport strategy for authenticating x-auth-token / Bearer tokens
-function SisTokenStrategy(sm, sessionManager) {
-    this._verify = _verifySisToken.bind(null, sm, sessionManager);
-    passport.Strategy.call(this);
-    this.name = SIS.SCHEMA_TOKENS;
-}
-
-util.inherits(SisTokenStrategy, passport.Strategy);
-
-SisTokenStrategy.prototype.authenticate = function(req) {
-    var extracted = extractToken(req);
-    if (extracted.error) { return this.error(extracted.error); }
-
-    var self = this;
-    function verified(err, user) {
-        if (err) {
-            return self.error(err);
-        } else if (!user) {
-            return self.error(SIS.ERR_BAD_CREDS("No user for the token exists."));
-        }
-        self.success(user);
+class SisTokenStrategy extends passport.Strategy {
+    constructor(sm, sessionManager) {
+        super();
+        this._verify = _verifySisToken.bind(null, sm, sessionManager);
+        this.name = SIS.SCHEMA_TOKENS;
     }
 
-    this._verify(extracted.token, verified);
-};
+    authenticate(req) {
+        var extracted = extractToken(req);
+        if (extracted.error) { return this.error(extracted.error); }
+
+        var verified = (err, user) => {
+            if (err) {
+                return this.error(err);
+            } else if (!user) {
+                return this.error(SIS.ERR_BAD_CREDS("No user for the token exists."));
+            }
+            this.success(user);
+        };
+
+        this._verify(extracted.token, verified);
+    }
+}
 
 module.exports.createTokenStrategy = function(sm, sessionManager) {
     return new SisTokenStrategy(sm, sessionManager);
@@ -234,34 +234,42 @@ module.exports.authenticate = function(req, res, type) {
     });
 };
 
+// The SIS error to send for an error passed to express's error handler:
+// a SIS error as it is, an error of the body parser (such as a body that is
+// not JSON or is too large) as a bad request with its 4xx status, and
+// anything else as an internal error
+module.exports.toSisError = function(err) {
+    if (err instanceof Array && err.length >= 2) {
+        return err;
+    }
+    if (err && err.expose && err.status >= 400 && err.status < 500) {
+        if (err.type === "entity.parse.failed") {
+            return SIS.ERR_BAD_REQ("Invalid JSON");
+        }
+        var badReq = SIS.ERR_BAD_REQ(err.message);
+        return [err.status, badReq[1]];
+    }
+    return SIS.ERR_INTERNAL("Unexpected error : " + err);
+};
+
 // Express middleware that rejects requests without a valid API token
-module.exports.requireToken = function(req, res, next) {
-    module.exports.authenticate(req, res, SIS.SCHEMA_TOKENS).then(function() {
-        next();
-    }, function(err) {
+module.exports.requireToken = async function(req, res, next) {
+    try {
+        await module.exports.authenticate(req, res, SIS.SCHEMA_TOKENS);
+    } catch (err) {
         if (!(err instanceof Array) || err.length < 2) {
             err = SIS.ERR_INTERNAL("Authentication failed : " + err);
         }
         res.status(err[0]).send(err[1]);
+        return;
+    }
+    next();
+};
+
+var mapIds = function(objs) {
+    return objs.map(function(obj) {
+        return obj._id.toString();
     });
-};
-
-var stripOutId = function(idObj) {
-    return idObj._id.toString();
-};
-
-var getQueryIdsCallback = function(d) {
-    return function(e, ids) {
-        if (e) {
-            return d.reject(SIS.ERR_INTERNAL(e));
-        }
-        ids = ids.map(stripOutId);
-        d.resolve(ids);
-    };
-};
-
-var mapIds = function(ids) {
-    return ids.map(stripOutId);
 };
 
 var getFindCond = function(key, condition) {
@@ -270,79 +278,45 @@ var getFindCond = function(key, condition) {
     return result;
 };
 
-// returns a promise for an array of object ids that match a given condition
-// at the model's schemaPath.  remainingPath is the path left over
-// in the query.
-// for instance, a query for ref_field.num - schema path would be
-// ref_field, and num would be remainingPath.  model would point to
-// the model that knows about the ref_field and which other model it
-// belongs to.
-var getObjectIds = function(schemaRef, condition, remainingPath,
-                            sm, model) {
-    var optRef = schemaRef.ref;
-    if (!optRef) {
-        // just return an empty array
-        return Promise.resolve([]);
+// Resolves with the ids of the objects schemaRef refers to that match
+// condition at remainingPath, the path left over in the query.
+// For instance, for a query for ref_field.num, schemaRef is the reference
+// at ref_field and remainingPath is num.
+var getObjectIds = async function(schemaRef, condition, remainingPath, sm) {
+    if (!schemaRef.ref) {
+        return [];
     }
-    return sm.getEntityModelAsync(optRef).then(function(sisModel){
-        // need to check if the remainingPath is another reference
-        // or the actual path
-        var path = sisModel.schema.path(remainingPath);
-        if (path) {
-            // we can query this since it is a property of the model
-            return Promise.resolve(sisModel.find(getFindCond(remainingPath, condition), '_id').exec())
-                .then(mapIds);
-        } else {
-            // need to see if we're looking to join another set of object ids
-            var references = SIS.UTIL_GET_OID_PATHS(sisModel.schema);
-            if (!references.length) {
-                // no object ids referenced by this nested model, so the
-                // path is invalid.. bail
-                return Promise.resolve([]);
-            } else {
-                // find out which reference matches the remainingPath
-                var found = false;
-                path = null;
-                var ref = null;
-                for (var i = 0; i < references.length; ++i) {
-                    ref = references[i].path;
-                    path = ref + ".";
-                    if (remainingPath.indexOf(path) === 0) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (found) {
-                    // if it's path._id then we can just query this
-                    if (remainingPath == path + "_id") {
-                        return Promise.resolve(sisModel.find(getFindCond(remainingPath, condition), '_id',
-                                                  { lean : true }).exec()).then(mapIds);
-                    } else {
-                        // nested so we need to get the ids and then
-                        // issue an $in query for this path
-                        var nestedRemain = remainingPath.substring(path.length);
-                        return getObjectIds(references[i], condition, nestedRemain,
-                                            sm, sisModel).then(function(ids) {
-                            if (!ids || !ids.length) {
-                                return Promise.resolve([]);
-                            }
-                            var findCond = ids.length == 1 ? getFindCond(ref, ids[0]) : getFindCond(ref, { "$in" : ids});
-                            return Promise.resolve(sisModel.find(findCond, '_id', {lean : true}).exec()).then(mapIds);
-                        });
-                    }
-                } else {
-                    // path is invalid.  just return empty
-                    return Promise.resolve([]);
-                }
-            }
+    try {
+        var sisModel = await sm.getEntityModelAsync(schemaRef.ref);
+        if (sisModel.schema.path(remainingPath)) {
+            // a path of the referenced objects - query it
+            return mapIds(await sisModel.find(getFindCond(remainingPath, condition), '_id').exec());
         }
-    })
-    .catch(function(err) {
-        if (err instanceof Array) {
-            return Promise.reject(err);
+        // a path of the objects they refer to in turn
+        var nested = SIS.UTIL_GET_OID_PATHS(sisModel.schema).find(function(ref) {
+            return remainingPath.indexOf(ref.path + ".") === 0;
+        });
+        if (!nested) {
+            // the path is invalid - nothing matches it
+            return [];
         }
-        return Promise.reject(SIS.ERR_INTERNAL(err));
-    });
+        var prefix = nested.path + ".";
+        if (remainingPath == prefix + "_id") {
+            // the referenced ids are on the objects - query them
+            return mapIds(await sisModel.find(getFindCond(remainingPath, condition), '_id',
+                                              { lean : true }).exec());
+        }
+        // get the ids of the nested objects and then the objects
+        // that refer to them
+        var ids = await getObjectIds(nested, condition, remainingPath.substring(prefix.length), sm);
+        if (!ids.length) {
+            return [];
+        }
+        var findCond = getFindCond(nested.path, ids.length == 1 ? ids[0] : { "$in" : ids });
+        return mapIds(await sisModel.find(findCond, '_id', { lean : true }).exec());
+    } catch (err) {
+        throw err instanceof Array ? err : SIS.ERR_INTERNAL(err);
+    }
 };
 
 var addIdsToFlattenedCondition = function(flattened, path, ids) {
@@ -392,117 +366,69 @@ function getValidKeys(condition) {
 
 var OR_AND_NOR = ["$or","$and","$nor"];
 
-// "flatten" a query of mgr's objects to deal with all joins
-// returns a promise for the flattened query
-module.exports.flattenCondition = function(condition, schemaManager, mgr) {
+// "flatten" a query of mgr's objects to deal with all joins: a condition on
+// a path of referenced objects becomes one on the ids of the objects that
+// match it.  Resolves with the flattened query.
+module.exports.flattenCondition = async function(condition, schemaManager, mgr) {
     var references = mgr.getReferences();
     if (!condition || typeof condition !== 'object' ||
         !references || !references.length) {
-        return Promise.resolve(condition);
+        return condition;
     }
     var keys = getValidKeys(condition);
     if (!keys) {
-        return Promise.resolve(condition);
+        return condition;
     }
-    var paths = references.map(function(ref) {
-        return ref;
-    });
-
-    function mapInnerCondition(innerCond) {
-        return module.exports.flattenCondition(innerCond, schemaManager, mgr);
-    }
-
-    var mustFlatten = false;
     var flattened = { };
-    var orAndNorPromises = [];
-    // the field in the condition that maps
-    // to a join path
-    var fieldToPath = {};
-
-    // deal with $or and $and and $nor
-    OR_AND_NOR.forEach(function(key) {
-        if (condition[key]) {
-            var promise = Promise.all((condition[key]).map(mapInnerCondition))
-                .then(function(flatConditions) {
-                    return [key, flatConditions];
-                });
-            orAndNorPromises.push(promise);
-            mustFlatten = true;
-            delete condition[key];
+    // the reference of each field in the condition on a join path
+    var fieldToRef = { };
+    var orAndNor = [];
+    keys.forEach(function(key) {
+        if (OR_AND_NOR.indexOf(key) !== -1) {
+            orAndNor.push(key);
+            return;
         }
-    });
-
-    // or and nor already taken care of
-    var k = 0;
-    var key = null;
-    for (k = 0; k < keys.length; ++k) {
-        key = keys[k];
-        // compare with the references - probably a better way to do
-        // this ;)
-        for (var i = 0; i < paths.length; ++i) {
-            var ref = paths[i].path + ".";
-            if (key.indexOf(ref) === 0 && key != ref + "_id") {
-                fieldToPath[key] = [paths[i], condition[key]];
-                mustFlatten = true;
-                break;
-            }
-        }
-        if (!fieldToPath[key]) {
+        var ref = references.find(function(r) {
+            return key.indexOf(r.path + ".") === 0 && key != r.path + "._id";
+        });
+        if (ref) {
+            fieldToRef[key] = ref;
+        } else {
             // shallow copy to flattened since it is a reference to an embedded
             // subdoc
             flattened[key] = condition[key];
         }
+    });
+    var fieldKeys = Object.keys(fieldToRef);
+    if (!fieldKeys.length && !orAndNor.length) {
+        return condition;
     }
-    if (mustFlatten) {
-        // need to flatten the condition
-        // convert all keys in the fieldToPath to
-        // path => [id]
-        var fieldKeys = Object.keys(fieldToPath);
-        var promises = fieldKeys.map(function(key) {
-            var schemaPath = fieldToPath[key][0];
-            var cond = fieldToPath[key][1];
-            var remainingPath = key.substring(schemaPath.path.length + 1);
-            return getObjectIds(schemaPath, cond, remainingPath,
-                                schemaManager, mgr.model);
-        });
-        var resultPromise = Promise.resolve(flattened);
-        if (promises.length) {
-            resultPromise = resultPromise.then(function(flattened) {
-                return Promise.all(promises).then(function(results) {
-                    var refConds = {};
-                    for (var i = 0; i < results.length; ++i) {
-                        var key = fieldKeys[i];
-                        var path = fieldToPath[key][0].path;
-                        var ids = results[i];
-                        addIdsToFlattenedCondition(refConds, path, ids);
-                    }
-                    for (var k in refConds) {
-                        var v = refConds[k];
-                        if (v instanceof Array) {
-                            flattened[k] = { "$in" : v };
-                        } else {
-                            flattened[k] = v;
-                        }
-                    }
-                    return flattened;
-                });
-            });
-        }
-        if (orAndNorPromises.length) {
-            resultPromise = resultPromise.then(function(flattened) {
-                return Promise.all(orAndNorPromises).then(function(results) {
-                    results.forEach(function(res) {
-                        // res is tuple of key => flattened conditions
-                        flattened[res[0]] = res[1];
-                    });
-                    return flattened;
-                });
-            });
-        }
-        return resultPromise;
-    } else {
-        return Promise.resolve(condition);
-    }
+    var results = await Promise.all([
+        // the ids matching each join path
+        Promise.all(fieldKeys.map(function(key) {
+            var ref = fieldToRef[key];
+            return getObjectIds(ref, condition[key], key.substring(ref.path.length + 1), schemaManager);
+        })),
+        // the flattened conditions of $or, $and and $nor
+        Promise.all(orAndNor.map(function(key) {
+            return Promise.all(condition[key].map(function(inner) {
+                return module.exports.flattenCondition(inner, schemaManager, mgr);
+            }));
+        }))
+    ]);
+    // the ids the objects must refer to, by path
+    var refConds = { };
+    results[0].forEach(function(ids, i) {
+        addIdsToFlattenedCondition(refConds, fieldToRef[fieldKeys[i]].path, ids);
+    });
+    Object.keys(refConds).forEach(function(path) {
+        var ids = refConds[path];
+        flattened[path] = ids instanceof Array ? { "$in" : ids } : ids;
+    });
+    results[1].forEach(function(conditions, i) {
+        flattened[orAndNor[i]] = conditions;
+    });
+    return flattened;
 };
 
 module.exports.parsePopulate = function(reqQuery) {
@@ -518,9 +444,16 @@ module.exports.parsePopulate = function(reqQuery) {
     }
 };
 
-var ERROR_QUERY = {};
+// The query parseQuery returns when q is not a JSON object.  Frozen: it is
+// shared by every such request, so nothing may add a condition to it.
+var ERROR_QUERY = Object.freeze({});
 
 module.exports.ERROR_QUERY = ERROR_QUERY;
+
+// The error to send for a query parseQuery returned ERROR_QUERY for
+module.exports.invalidQueryError = function() {
+    return SIS.ERR_BAD_REQ("Query parameter is invalid.  Must be JSON");
+};
 
 module.exports.parseQuery = function(reqQuery, version, enforceLimit) {
     var query = reqQuery.q || { };

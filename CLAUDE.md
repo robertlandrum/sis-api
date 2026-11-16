@@ -109,7 +109,9 @@ normalization, and populate behavior. See `docs/index.md` for the full field/end
   `ERR_INTERNAL` turns MongoDB duplicate key errors into `ERR_CONFLICT` (409, code 1005,
   naming the taken value) and sends other errors as their name and message only (the
   stack goes to the log); `ApiController.sendError` routes any non-tuple error through it,
-  so no raw error reaches a client.
+  so no raw error reaches a client. The final error handler in `server.js` sends errors
+  through `webUtil.toSisError` (SIS errors as they are, body parser errors with their
+  4xx status, the rest as `ERR_INTERNAL`).
 - **Indexes**: Mongoose builds a model's indexes in the background, and a write that gets
   ahead of a unique index is not checked (and then keeps the index from being built).
   `schemaManager.indexesReady(model)` waits for them: `getEntityManager` uses it before
@@ -136,22 +138,27 @@ bootstrap the first superuser, since the REST API requires an existing privilege
 ## Conventions
 
 - The code is moving to `async`/`await` ahead of an ESM conversion. The managers in
-  `util/` are converted: they are ES classes (`class X extends Manager`, with `super(...)`
-  and `super.method(...)`) and use `async` methods, `try`/`catch` around awaited calls and
-  arrow callbacks instead of `var self = this`, and take no callbacks. The routes
-  (`routes/`) and `endpoints/` still use constructor functions with `util.inherits` and
-  promise chains. Write new code the converted way
+  `util/`, the controllers in `routes/` and the endpoint code in `endpoints/` are
+  converted: they are ES classes (`class X extends Manager`, with `super(...)` and
+  `super.method(...)`) and use `async` methods, `try`/`catch` around awaited calls and
+  arrow callbacks instead of `var self = this`, and take no callbacks. The tests still
+  lean on callbacks and the `.nodeify`/`.done` shim. Write new code the converted way
   and cover it in the style of `test/test-manager.js` (`async` mocha tests, with
-  `TestUtil.expectError` for SIS error tuples). Results with more than one part are
+  `TestUtil.expectError` for SIS error tuples).
+- Controller handlers are `async (req, res)` methods wrapped by `_wrapAuth` /
+  `_wrapReadAuth`, which authenticate and send whatever the handler throws. A handler
+  hands `_finish(req, res, code, async () => result)` the work that resolves its result;
+  `_finish` saves the commit, sends the result, dispatches the hooks and sends errors.
+  Parse queries with `_parseValidQuery`, which sends the 400 for a `q` that is not JSON
+  (`webUtil.ERROR_QUERY` is shared and frozen - never add conditions to it).
+- The script client objects (`endpoints/api-client.js`, `api-response.js`) stay closures:
+  they are cloned into each script's context. Results with more than one part are
   named objects, not arrays: `update`/`upsert` resolve with `{ old, updated }` (`old`
   is null when an upsert added the object), and bulk operations with
   `{ success, errors }`.
-- Promises are **native** (`Promise`). The small `util/promises.js` helper provides the
-  idioms the code still leans on: `defer()` (replaces the old `BPromise.pending()`),
-  `nodeify(promise, cb)` and `tap(fn)` (`.then(P.tap(fn))`). When a promise chain in
-  the unconverted code needs `this`, capture `var self = this;` and reference `self`
-  inside callbacks (there is no bluebird `.bind(this)` anymore); bare method references
-  passed to `.then` must be `.bind(self)`.
+- Promises are **native** (`Promise`). The small `util/promises.js` helper provides
+  `defer()` (a promise settled from events, as the endpoint workers need) and
+  `nodeify(promise, cb)` (for callback APIs such as passport's verify functions).
 - Mongoose 8 notes that bit during the upgrade and are worth remembering: query/model
   methods return promises (no callbacks); `ObjectId` instance strings are `"ObjectId"`;
   `strictQuery` is set to `false` (see `schema-manager.js`) so non-schema query paths

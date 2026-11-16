@@ -13,6 +13,16 @@ if (req.path === "/get") {
     hosts.get(req.query.name).then(function(host) { res.json(host); }, fail);
 } else if (req.path === "/list") {
     hosts.listAll({ q : { env : req.query.env }, sort : "name" }).then(function(list) { res.json(list); }, fail);
+} else if (req.path === "/badquery") {
+    hosts.listAll({ q : "notjson" }).then(function(list) { res.json(list); }, fail);
+} else if (req.path === "/schema") {
+    Promise.all([client.schemas.get("test_ep_client_hosts"),
+                 client.schemas.listAll({ q : { name : "test_ep_client_hosts" } })])
+    .then(function(r) { res.json({ get : r[0], list : r[1] }); }, fail);
+} else if (req.path === "/hiera") {
+    Promise.all([client.hiera.get("test_ep_client_hiera"),
+                 client.hiera.listAll({ q : { name : "test_ep_client_hiera" } })])
+    .then(function(r) { res.json({ get : r[0], list : r[1] }); }, fail);
 } else if (req.path === "/missing") {
     client.entities("test_ep_no_such_schema").get("x").then(function(e) { res.json(e); }, fail);
 } else if (req.path === "/unused") {

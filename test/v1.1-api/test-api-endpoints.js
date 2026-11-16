@@ -214,11 +214,16 @@ describe("@API @V1.1API - Scripts API", function() {
             await ApiServer.post("/api/v1.1/entities/" + schema.name)
                 .send([{ name : "h1", env : "qa" }, { name : "h2", env : "prod" }, { name : "h3", env : "qa" }])
                 .expect(200);
+            await ApiServer.del("/api/v1.1/hiera/test_ep_client_hiera");
+            await ApiServer.post("/api/v1.1/hiera")
+                .send({ name : "test_ep_client_hiera", _sis : { owner : ["test"] }, hieradata : { port : 80 } })
+                .expect(201);
             await addScript("clienttest");
             await addScript("asyncrunner");
         });
 
         after(async function() {
+            await ApiServer.del("/api/v1.1/hiera/test_ep_client_hiera");
             await ApiServer.del("/api/v1.1/scripts/clienttest");
             await ApiServer.del("/api/v1.1/scripts/asyncrunner");
             await ApiServer.del("/api/v1.1/schemas/" + schema.name);
@@ -238,6 +243,26 @@ describe("@API @V1.1API - Scripts API", function() {
         it("Should list entities matching a query", async function() {
             let res = await get("/list?env=qa").expect(200);
             res.body.map(function(h) { return h.name; }).should.eql(["h1", "h3"]);
+        });
+
+        it("Should reject an invalid query", async function() {
+            let res = await get("/badquery").expect(400);
+            res.body.error.should.match(/Query parameter is invalid/);
+        });
+
+        it("Should get schemas", async function() {
+            let res = await get("/schema").expect(200);
+            res.body.get.name.should.eql(schema.name);
+            res.body.get.definition.should.eql(schema.definition);
+            res.body.list.map(function(s) { return s.name; }).should.eql([schema.name]);
+        });
+
+        it("Should get hiera entries as the hiera API sends them", async function() {
+            let res = await get("/hiera").expect(200);
+            // the hiera API sends a single entry as { name : hieradata }
+            res.body.get.should.eql({ test_ep_client_hiera : { port : 80 } });
+            res.body.list.length.should.eql(1);
+            res.body.list[0].hieradata.should.eql({ port : 80 });
         });
 
         it("Should pass errors to the script", async function() {
