@@ -19,26 +19,27 @@ describe('Readonly API ', function() {
     var ApiServer = new TestUtil.TestServer();
     var app = null;
 
-    it("Should setup fixtures", function(done) {
+    it("Should setup fixtures", async function() {
         nconf.add("readonly", {
                 type: "literal",
                 store: {
                     "app" : { "readonly" : true }
                 }
             });
-        ApiServer.start(function(err, sd) {
-            if (err) { return done(err); }
-            app = sd.app;
-            var options = { user : sd.superUser, version : "v1.1" };
-            sd.schemaManager.delete(schema.name, options).nodeify(function() {
-                sd.schemaManager.add(schema, options).nodeify(done);
-            });
-        });
+        var sd = await ApiServer.start();
+        app = sd.app;
+        var options = { user : sd.superUser, version : "v1.1" };
+        try {
+            await sd.schemaManager.delete(schema.name, options);
+        } catch (err) {
+            // not there yet
+        }
+        await sd.schemaManager.add(schema, options);
     });
 
-    after(function(done) {
+    after(async function() {
         nconf.remove("readonly");
-        ApiServer.stop(done);
+        await ApiServer.stop();
     });
 
     it("should have readonly set in the app", function() {
@@ -53,17 +54,16 @@ describe('Readonly API ', function() {
     ];
 
     paths.map(function(path) {
-        it("should allow GET on " + path, function(done) {
-            ApiServer.get(path)
-                     .expect(200, done);
+        it("should allow GET on " + path, async function() {
+            await ApiServer.get(path).expect(200);
         });
     });
 
     paths.map(function(path) {
-        it("should 404 when POSTing to " + path, function(done) {
-            ApiServer.post(path)
+        it("should 404 when POSTing to " + path, async function() {
+            await ApiServer.post(path)
                 .send({"unprocessed" : "entity"})
-                .expect(404, done);
+                .expect(404);
         });
     });
 

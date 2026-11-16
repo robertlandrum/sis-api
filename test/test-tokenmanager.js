@@ -3,22 +3,19 @@ describe('Token Manager', function() {
 
     var should = require('should');
     var util = require('util');
-    var async = require('async');
 
     var SIS = require("../util/constants");
     var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
     var schemaManager = null;
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
-            done(err);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
 
     var users = require("./fixtures/authdata").createUsers();
@@ -90,29 +87,20 @@ describe('Token Manager', function() {
         ["user3", "admin1", 'a', "test_g2", 'user', false]
     ];
 
-    it("should not store tokens that expire", function(done) {
+    it("should not store tokens that expire", async function() {
         // temporary tokens are JWT sessions and never stored
         var tokenManager = schemaManager.getTokenManagerForUser("user1");
         var token = { username : "user1", expires : Date.now() + 10000 };
-        tokenManager.add(token, { user : users.superman }).nodeify(function(err) {
-            should.exist(err);
-            err[0].should.eql(400);
-            err[1].error.should.match(/cannot expire/);
-            done();
-        });
+        await TestUtil.expectError(tokenManager.add(token, { user : users.superman }), 400, /cannot expire/);
     });
 
     describe("persistent tokens", function() {
         // add all users and a token in parallel
-        before(function(done) {
-            async.parallel(superTests.map(function(test) {
-                var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
-                var u1 = users[test[0]];
-                var u2 = users[test[1]];
-                return function(cb) {
-                    userManager.add(u2, { user : u1 }).nodeify(cb);
-                };
-            }), done);
+        before(async function() {
+            var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
+            await Promise.all(superTests.map(function(test) {
+                return userManager.add(users[test[1]], { user : users[test[0]] });
+            }));
         });
 
         // add tests should map to who can create a token for a user
@@ -127,44 +115,30 @@ describe('Token Manager', function() {
                 pass = false;
             }
             var testName = util.format("%s %s create token for %s", usr, (pass ? "can" : "cannot"), usr2);
-            it(testName, function(done) {
+            it(testName, async function() {
                 var tokenManager = schemaManager.getTokenManagerForUser(u2[SIS.FIELD_NAME]);
                 var token = {
                     username : u2[SIS.FIELD_NAME],
                     desc : "token added by " + u1[SIS.FIELD_NAME]
                 };
-                tokenManager.add(token, { user : u1 }).nodeify(function(err, obj) {
-                    if (pass) {
-                        // expect pass..
-                        should.not.exist(err);
-                        should.exist(obj);
-                        obj[SIS.FIELD_USERNAME].should.eql(u2[SIS.FIELD_NAME]);
-                        done();
-                    } else {
-                        should.exist(err);
-                        done();
-                    }
-                });
+                var added = tokenManager.add(token, { user : u1 });
+                if (pass) {
+                    (await added)[SIS.FIELD_USERNAME].should.eql(u2[SIS.FIELD_NAME]);
+                } else {
+                    await should(added).be.rejected();
+                }
             });
         });
 
         // delete all users in parallel
         // and ensure the tokens are gone
         superTests.map(function(test) {
-            it("Should delete user and all tokens for " + test[1], function(done) {
+            it("Should delete user and all tokens for " + test[1], async function() {
                 var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
-                var u1 = users[test[0]];
-                var u2 = users[test[1]];
-                userManager.delete(u2[SIS.FIELD_NAME], { user : u1 }).nodeify(function(e, u) {
-                    should.not.exist(e);
-                    should.exist(u);
-                    var tokenManager = schemaManager.getTokenManagerForUser(u[SIS.FIELD_NAME]);
-                    tokenManager.getAll({ }, null, null)
-                    .done(function(res) {
-                        res.length.should.eql(0);
-                        done();
-                    }, done);
-                });
+                var u = await userManager.delete(users[test[1]][SIS.FIELD_NAME], { user : users[test[0]] });
+                should.exist(u);
+                var tokenManager = schemaManager.getTokenManagerForUser(u[SIS.FIELD_NAME]);
+                (await tokenManager.getAll({ }, null, null)).length.should.eql(0);
             });
         });
     });
