@@ -14,44 +14,32 @@ describe("@API @V1.1API - Scripts API", function() {
         return fs.readFileSync(p, { encoding: "utf8" });
     }
 
-    after(function(done) {
-        ApiServer.stop(done);
+    after(async function() {
+        await ApiServer.stop();
     });
 
-    function errHandler(done) {
-        return function(err, res) {
-            if (err) {
-                console.log(err);
-                console.log(res.body);
-            }
-            should.not.exist(err);
-            err = res.body;
-            err.should.be.instanceof(Object);
-            err.should.not.be.instanceof(Array);
-            should.exist(err.code);
-            should.exist(err.error);
-            done();
-        };
+    // the body of an error response is a SIS error object
+    function expectErrorBody(res) {
+        let err = res.body;
+        err.should.be.instanceof(Object);
+        err.should.not.be.instanceof(Array);
+        should.exist(err.code);
+        should.exist(err.error);
     }
 
-    it("Should setup fixtures", function(done) {
-        ApiServer.start(function(e) {
-            if (e) {
-                done(e);
-                return;
-            }
-            ApiServer.becomeSuperUser(done);
-        });
+    it("Should setup fixtures", async function() {
+        await ApiServer.start();
+        await ApiServer.becomeSuperUser();
     });
 
     let script_type = "application/javascript";
 
     describe("Error cases", function() {
-        it("Should fail if script doesn't exist", function(done) {
-            ApiServer.get("/api/v1.1/scripts/foo").expect(404, errHandler(done));
+        it("Should fail if script doesn't exist", async function() {
+            expectErrorBody(await ApiServer.get("/api/v1.1/scripts/foo").expect(404));
         });
-        it("Should fail to hit an endpoint that doesn't exist", function(done) {
-            ApiServer.get("/api/v1.1/endpoints/foo").expect(404, errHandler(done));
+        it("Should fail to hit an endpoint that doesn't exist", async function() {
+            expectErrorBody(await ApiServer.get("/api/v1.1/endpoints/foo").expect(404));
         });
         let validObject = {
             name: "valid",
@@ -63,33 +51,31 @@ describe("@API @V1.1API - Scripts API", function() {
         };
         Object.keys(validObject).forEach(function(k) {
             let o = clone(validObject);
-            it("Should fail to add script without " + k, function(done) {
+            it("Should fail to add script without " + k, async function() {
                 delete o[k];
-                ApiServer.post("/api/v1.1/scripts")
-                    .send(o).expect(400, errHandler(done));
+                expectErrorBody(await ApiServer.post("/api/v1.1/scripts")
+                    .send(o).expect(400));
             });
         });
         // add a bad syntax one
         validObject.script = loadScript("bad_syntax");
-        it("Should fail to add a script with bad syntax", function(done) {
-            ApiServer.post("/api/v1.1/scripts")
-                .send(validObject).expect(400, errHandler(done));
-
+        it("Should fail to add a script with bad syntax", async function() {
+            expectErrorBody(await ApiServer.post("/api/v1.1/scripts")
+                .send(validObject).expect(400));
         });
     });
 
-    function deleteScript(name, done) {
-        let uri = "/api/v1.1/scripts/" + name;
-        ApiServer.del(uri).end(done);
+    function deleteScript(name) {
+        return ApiServer.del("/api/v1.1/scripts/" + name);
     }
 
     describe("Script params", function() {
         let name = "params";
         // nuke it if it exists
-        before(function(done) {
-            deleteScript(name, done);
+        before(async function() {
+            await deleteScript(name);
         });
-        it("should load the script", function(done) {
+        it("should load the script", async function() {
             let script = {
                 name,
                 script_type,
@@ -98,8 +84,8 @@ describe("@API @V1.1API - Scripts API", function() {
                     owner : ["test"]
                 }
             };
-            ApiServer.post("/api/v1.1/scripts")
-                .send(script).expect(201, done);
+            await ApiServer.post("/api/v1.1/scripts")
+                .send(script).expect(201);
         });
 
         let allPaths = [
@@ -114,14 +100,10 @@ describe("@API @V1.1API - Scripts API", function() {
             let path = p[0];
             let expected = p[1];
             let uri = "/api/v1.1/endpoints/params" + path;
-            it(`Should respond to ${uri} with ${expected}`, function(done) {
-                ApiServer.get(uri).expect(200, function(err, res) {
-                    should.not.exist(err);
-                    res = res.body;
-                    should.exist(res.path);
-                    res.path.should.eql(expected);
-                    done();
-                });
+            it(`Should respond to ${uri} with ${expected}`, async function() {
+                let res = (await ApiServer.get(uri).expect(200)).body;
+                should.exist(res.path);
+                res.path.should.eql(expected);
             });
         });
     });
@@ -130,10 +112,10 @@ describe("@API @V1.1API - Scripts API", function() {
         let csvParse = require("csv-parse/sync");
         let yaml = require("js-yaml");
         let name = 'formats';
-        before(function(done) {
-            deleteScript(name, done);
+        before(async function() {
+            await deleteScript(name);
         });
-        it("Should load the script", function(done) {
+        it("Should load the script", async function() {
             let script = {
                 name,
                 script_type,
@@ -142,11 +124,8 @@ describe("@API @V1.1API - Scripts API", function() {
                     owner : ["test"]
                 }
             };
-            ApiServer.post("/api/v1.1/scripts")
-                .send(script).expect(201, function(err, res) {
-                    if (err) { console.log(err); console.log(res.body); }
-                    done(err);
-                });
+            await ApiServer.post("/api/v1.1/scripts")
+                .send(script).expect(201);
         });
 
         let expectedData  = [
@@ -160,35 +139,19 @@ describe("@API @V1.1API - Scripts API", function() {
 
         let baseUri = "/api/v1.1/endpoints/formats";
 
-        it("Should return csv", function(done) {
-            let uri = `${baseUri}/csv`;
-            ApiServer.get(uri).expect(200, function(err, res) {
-                should.not.exist(err);
-                let body = res.text;
-                let result = csvParse.parse(body);
-                result.should.eql(csvData);
-                done();
-            });
+        it("Should return csv", async function() {
+            let res = await ApiServer.get(`${baseUri}/csv`).expect(200);
+            csvParse.parse(res.text).should.eql(csvData);
         });
 
-        it("Should return yaml", function(done) {
-            let uri = `${baseUri}/yaml`;
-            ApiServer.get(uri).expect(200, function(err, res) {
-                should.not.exist(err);
-                let body = res.text;
-                let data = yaml.load(body);
-                data.should.eql(expectedData);
-                done();
-            });
+        it("Should return yaml", async function() {
+            let res = await ApiServer.get(`${baseUri}/yaml`).expect(200);
+            yaml.load(res.text).should.eql(expectedData);
         });
 
-        it("Should return json", function(done) {
-            let uri = `${baseUri}/json`;
-            ApiServer.get(uri).expect(200, function(err, res) {
-                should.not.exist(err);
-                res.body.should.eql(expectedData);
-                done();
-            });
+        it("Should return json", async function() {
+            let res = await ApiServer.get(`${baseUri}/json`).expect(200);
+            res.body.should.eql(expectedData);
         });
     });
 
