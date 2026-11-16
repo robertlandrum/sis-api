@@ -1,6 +1,9 @@
+import nconf from "nconf";
+import should from "should";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+
 describe('Readonly API ', function() {
-    "use strict";
-    var nconf = require("nconf");
     var schema = {
         "name":"test_entity",
         _sis : { "owner" : ["test"] },
@@ -13,9 +16,6 @@ describe('Readonly API ', function() {
         }
     };
 
-    var SIS = require("../util/constants");
-    var should = require('should');
-    var TestUtil = require('./fixtures/util');
     var ApiServer = new TestUtil.TestServer();
     var app = null;
 

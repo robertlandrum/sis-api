@@ -1,10 +1,8 @@
-"use strict";
+import net from "net";
 
 // A minimal LDAP server for the tests: it answers simple bind requests,
 // accepting the DN / password pairs it is given, and ends the connection
 // on an unbind.  Messages are BER encoded (RFC 4511).
-
-var net = require("net");
 
 var SEQUENCE = 0x30;
 var INTEGER = 0x02;
@@ -78,7 +76,7 @@ function bindResponse(messageId, resultCode) {
 // Start a server that accepts the binds in accounts ({ dn : password }).
 // Resolves with { url, accounts, binds, close() } - binds lists the DNs
 // bound with, and accounts can be added to.
-module.exports.start = function(accounts) {
+export function start(accounts) {
     var binds = [];
     var server = net.createServer(function(socket) {
         var pending = Buffer.alloc(0);
@@ -121,4 +119,4 @@ module.exports.start = function(accounts) {
             });
         });
     });
-};
+}

@@ -1,7 +1,6 @@
 
 // templatize this for the env
-module.exports =
-{
+export default {
     db: {
         url : "mongodb://localhost/sis",
         opts : {

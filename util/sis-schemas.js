@@ -1,7 +1,4 @@
-
-'use strict';
-
-var SIS = require('./constants');
+import SIS from "./constants.js";
 
 // mongoose <5 treated `required` on an array as "must be non-empty"; mongoose
 // 5+ considers an empty array to satisfy `required`.  SIS relies on owners
@@ -23,10 +20,10 @@ sisMetaDef[SIS.FIELD_SIS_VERSION] = "String";
 
 
 // meta fields
-module.exports.metaDef = sisMetaDef;
+export { sisMetaDef as metaDef };
 
 // schema definitions
-module.exports.schemas = [
+export const schemas = [
     // sis_schemas
     {
         name : SIS.SCHEMA_SCHEMAS,

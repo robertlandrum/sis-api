@@ -1,8 +1,6 @@
-'use strict';
-
-var ApiController = require("./apicontroller");
-var SIS = require("../util/constants");
-var webUtil = require("./webutil");
+import ApiController from "./apicontroller.js";
+import SIS from "../util/constants.js";
+import * as webUtil from "./webutil.js";
 
 var fixBody = function(req) {
     if (req.method == "PUT" || req.method == "POST") {
@@ -97,7 +95,7 @@ class TokenController extends ApiController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     if (!config[SIS.OPT_USE_AUTH]) {
         return;
     }
@@ -105,4 +103,4 @@ module.exports.setup = function(app, config) {
     var controller = new TokenController(config);
     controller.wrapApi();
     controller.attach(app, "/users/:uid/tokens");
-};
+}

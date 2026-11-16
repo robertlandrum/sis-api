@@ -1,9 +1,7 @@
+import should from "should";
+import SIS from "../util/constants.js";
+
 describe('Error responses', function() {
-    "use strict";
-
-    var should = require('should');
-    var SIS = require("../util/constants");
-
     // runs fn, capturing what it logs (bunyan writes to stdout); returns
     // [fn's result, the log records]
     function capturingLog(fn) {

@@ -1,9 +1,7 @@
-'use strict';
-
-var ApiController = require("./apicontroller");
-var SIS = require("../util/constants");
-var createScriptManager = require("../util/script-manager");
-var nconf = require("nconf");
+import nconf from "nconf";
+import ApiController from "./apicontroller.js";
+import SIS from "../util/constants.js";
+import createScriptManager from "../util/script-manager.js";
 
 // Scripts controller
 class ScriptController extends ApiController {
@@ -19,10 +17,10 @@ class ScriptController extends ApiController {
 }
 
 // all route controllers expose a setup method
-module.exports.setup = function(app, config) {
+export function setup(app, config) {
     if (!nconf.get('app:scripts_enabled')) {
         return;
     }
     var controller = new ScriptController(config);
     controller.attach(app, "/scripts");
-};
+}

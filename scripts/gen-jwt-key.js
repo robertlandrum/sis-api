@@ -8,13 +8,11 @@
 // Writes <keys_dir>/jwt-<kid>.key (mode 0600) and <keys_dir>/jwt-<kid>.pub.
 // Never overwrites existing files.
 
-"use strict";
-
-var fs = require("fs");
-var path = require("path");
-var crypto = require("crypto");
-var SIS = require("../util/constants");
-var sessions = require("../util/session-manager");
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import SIS from "../util/constants.js";
+import * as sessions from "../util/session-manager.js";
 
 var args = process.argv.slice(2);
 var ifMissing = args.indexOf("--if-missing") !== -1;

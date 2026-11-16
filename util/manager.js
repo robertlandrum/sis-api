@@ -1,11 +1,8 @@
-
-'use strict';
-
-var SIS = require('./constants');
-var jsondiffpatch = require("jsondiffpatch");
-var crypto = require("crypto");
-var _ = require("lodash");
-var logger = require("./logger");
+import jsondiffpatch from "jsondiffpatch";
+import crypto from "crypto";
+import _ from "lodash";
+import SIS from "./constants.js";
+import * as logger from "./logger.js";
 
 var LOGGER = logger.createLogger({
     name : "Manager"
@@ -795,4 +792,4 @@ class Manager {
 }
 
 // exports
-module.exports = exports = Manager;
+export default Manager;

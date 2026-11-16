@@ -1,16 +1,16 @@
-describe('SchemaManager', function() {
-    "use strict";
+import should from "should";
+import SIS from "../util/constants.js";
+import * as TestUtil from "./fixtures/util.js";
+import createSchemaManager from "../util/schema-manager.js";
 
-    var SIS = require("../util/constants");
-    var should = require('should');
-    var TestUtil = require('./fixtures/util');
+describe('SchemaManager', function() {
     var LocalTest = new TestUtil.LocalTest();
 
     var schemaManager = null;
 
     before(async function() {
         var mongoose = await LocalTest.start();
-        schemaManager = require("../util/schema-manager")(mongoose, { auth : false});
+        schemaManager = createSchemaManager(mongoose, { auth : false});
     });
 
     after(async function() {

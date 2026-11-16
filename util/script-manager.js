@@ -1,12 +1,10 @@
 
 // A class used to manage the SIS Scripts defined by the /scripts api
 
-'use strict';
-var nconf = require('nconf');
-var vm = require("vm");
-
-var SIS = require('./constants');
-var Manager = require("./manager");
+import nconf from "nconf";
+import vm from "vm";
+import SIS from "./constants.js";
+import Manager from "./manager.js";
 
 // Script Manager
 class ScriptManager extends Manager {
@@ -40,6 +38,6 @@ class ScriptManager extends Manager {
     }
 }
 
-module.exports = function(schemaManager, opts) {
+export default function(schemaManager, opts) {
     return new ScriptManager(schemaManager);
-};
+}

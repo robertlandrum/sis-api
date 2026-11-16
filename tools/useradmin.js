@@ -1,11 +1,10 @@
 // script that can add / remove users
-"use strict";
 
-var mongoose = require('mongoose');
-var nconf = require('nconf');
-var SIS = require('../util/constants');
-var createSchemaManager = require('../util/schema-manager');
-var fs = require('fs');
+import mongoose from "mongoose";
+import nconf from "nconf";
+import fs from "fs";
+import SIS from "../util/constants.js";
+import createSchemaManager from "../util/schema-manager.js";
 
 if (process.argv.length != 4) {
     console.log("Require an action and argument.");
@@ -21,8 +20,8 @@ if (['update','delete'].indexOf(action) == -1) {
 
 nconf.env('__')
     .argv()
-    .file("config.json.local", __dirname + "/../conf/config.json.local")
-    .file("config.json", __dirname + "/../conf/config.json");
+    .file("config.json.local", import.meta.dirname + "/../conf/config.json.local")
+    .file("config.json", import.meta.dirname + "/../conf/config.json");
 
 var appConfig = nconf.get('app') || {};
 if (!appConfig.auth) {

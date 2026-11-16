@@ -5,17 +5,15 @@
 // Not all controllers need this and can use mongoose directly
 // but we have it here since the schemas and entities controller can benefit
 
-'use strict';
-
-var SIS = require("./constants");
-var Manager = require("./manager");
-var jsondiffpatch = require("jsondiffpatch");
-var logger = require("./logger");
-var createEntityManager = require("./entity-manager");
-var createUserManager = require("./user-manager");
-var createTokenManager = require("./token-manager");
-var sisSchemas = require("./sis-schemas");
-var registerTypes = require("./types");
+import jsondiffpatch from "jsondiffpatch";
+import SIS from "./constants.js";
+import Manager from "./manager.js";
+import * as logger from "./logger.js";
+import createEntityManager from "./entity-manager.js";
+import createUserManager from "./user-manager.js";
+import createTokenManager from "./token-manager.js";
+import * as sisSchemas from "./sis-schemas.js";
+import registerTypes from "./types/index.js";
 
 var LOGGER = logger.createLogger({
     name : "SchemaManager"
@@ -677,6 +675,6 @@ class SchemaManager extends Manager {
 }
 
 // export
-module.exports = function(mongoose, opts) {
+export default function(mongoose, opts) {
     return new SchemaManager(mongoose, opts);
-};
+}

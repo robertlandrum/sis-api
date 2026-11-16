@@ -1,12 +1,11 @@
-'use strict';
-
 // Generates build.json at the repo root (consumed by the /info endpoint).
-// Replaces the former grunt 'buildjson' task. Runs both when required (mocha
+// Replaces the former grunt 'buildjson' task. Runs both when imported (mocha
 // loads it via .mocharc) and when invoked directly (node scripts/gen-build-info.js).
 
-var fs = require('fs');
-var path = require('path');
-var pkg = require('../package.json');
+import fs from "fs";
+import path from "path";
+
+var pkg = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, "../package.json"), "utf8"));
 
 var output = {
     build_num : process.env.BUILD_NUMBER || 'local-build',
@@ -15,6 +14,6 @@ var output = {
     version : pkg.version
 };
 
-fs.writeFileSync(path.resolve(__dirname, '../build.json'), JSON.stringify(output));
+fs.writeFileSync(path.resolve(import.meta.dirname, '../build.json'), JSON.stringify(output));
 
-module.exports = output;
+export default output;

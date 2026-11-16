@@ -1,21 +1,21 @@
-'use strict';
+import vm from "vm";
+import clone from "clone";
+import csvStringify from "csv-stringify";
+import yaml from "js-yaml";
+import * as P from "../util/promises.js";
+import SIS from "../util/constants.js";
+import createScriptManager from "../util/script-manager.js";
+import createHieraManager from "../util/hiera-manager.js";
+import ApiClient from "./api-client.js";
+import ApiResponse from "./api-response.js";
+import * as logger from "../util/logger.js";
 
-var vm = require("vm");
-var clone = require("clone");
-var csvStringify = require('csv-stringify');
-var yaml = require('js-yaml');
-var P = require("../util/promises");
-var SIS = require("../util/constants");
-var createScriptManager = require("../util/script-manager");
-var createHieraManager = require("../util/hiera-manager");
-var LOGGER = require("../util/logger").createLogger({
+var LOGGER = logger.createLogger({
     name : "ScriptRunner"
 });
 
 
 // context apis
-var ApiClient = require("./api-client");
-var ApiResponse = require("./api-response");
 
 // internal holder to ensure the script finishes before sending out
 // a response
@@ -111,4 +111,4 @@ class ScriptRunner {
     }
 }
 
-module.exports = ScriptRunner;
+export default ScriptRunner;

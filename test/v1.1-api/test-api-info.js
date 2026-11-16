@@ -1,12 +1,8 @@
+import should from "should";
+import SIS from "../../util/constants.js";
+import * as TestUtil from "../fixtures/util.js";
+
 describe('@API @V1.1API - Info API', function() {
-    "use strict";
-
-    var should = require('should');
-
-    var SIS = require("../../util/constants");
-
-    var TestUtil = require('../fixtures/util');
-
     var ApiServer = new TestUtil.TestServer();
 
     it("Should setup fixtures", async function() {

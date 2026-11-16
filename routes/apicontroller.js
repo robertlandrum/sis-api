@@ -1,10 +1,8 @@
-'use strict';
-
-var nconf = require("nconf");
-var SIS = require("../util/constants");
-var createCommitManager = require("../util/commit-manager");
-var createHookManager = require("../util/hook-manager");
-var webUtil = require("./webutil");
+import nconf from "nconf";
+import SIS from "../util/constants.js";
+import createCommitManager from "../util/commit-manager.js";
+import createHookManager from "../util/hook-manager.js";
+import * as webUtil from "./webutil.js";
 
 var CHUNK_SIZE = 100;
 
@@ -575,4 +573,4 @@ class ApiController {
 }
 
 // export it
-module.exports = exports = ApiController;
+export default ApiController;

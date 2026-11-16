@@ -1,10 +1,8 @@
+import should from "should";
+import nconf from "nconf";
+import * as logger from "../util/logger.js";
+
 describe("Logger", function() {
-    "use strict";
-
-    var should = require("should");
-    var nconf = require("nconf");
-    var logger = require("../util/logger");
-
     // the records a logger writes while fn runs, parsed
     function captureRecords(fn) {
         var lines = [];

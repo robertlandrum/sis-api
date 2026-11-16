@@ -1,16 +1,18 @@
-describe("@API @V1.1API - Scripts API", function() {
-    "use strict";
-    let fs = require("fs");
-    let path = require("path");
-    let should = require("should");
-    let TestUtil = require("../fixtures/util");
-    let clone = require("clone");
+import fs from "fs";
+import path from "path";
+import should from "should";
+import clone from "clone";
+import * as csvParse from "csv-parse/sync";
+import yaml from "js-yaml";
+import ChildProcess from "child_process";
+import * as TestUtil from "../fixtures/util.js";
 
+describe("@API @V1.1API - Scripts API", function() {
     let ApiServer = new TestUtil.TestServer();
 
     function loadScript(scriptName) {
         scriptName += ".js";
-        let p = path.join(__dirname, "..", "fixtures", "scripts", scriptName);
+        let p = path.join(import.meta.dirname, "..", "fixtures", "scripts", scriptName);
         return fs.readFileSync(p, { encoding: "utf8" });
     }
 
@@ -109,8 +111,6 @@ describe("@API @V1.1API - Scripts API", function() {
     });
 
     describe("Output formats", function() {
-        let csvParse = require("csv-parse/sync");
-        let yaml = require("js-yaml");
         let name = 'formats';
         before(async function() {
             await deleteScript(name);
@@ -256,7 +256,7 @@ describe("@API @V1.1API - Scripts API", function() {
                 return this.skip();
             }
             (await get("/").expect(200)).text.should.eql("ok");
-            let pids = require("child_process").execSync("pgrep -P " + process.pid + " -f endpoints/main.js || true")
+            let pids = ChildProcess.execSync("pgrep -P " + process.pid + " -f endpoints/main.js || true")
                 .toString().split("\n").filter(Boolean);
             pids.length.should.be.above(0);
             pids.forEach(function(pid) { process.kill(Number(pid), "SIGKILL"); });

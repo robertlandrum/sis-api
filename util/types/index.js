@@ -1,5 +1,6 @@
-"use strict";
+import registerIpAddress from "./ipaddress.js";
+
 // catch all
-module.exports = exports = function(mongoose) {
-    require('./ipaddress')(mongoose);
-};
+export default function(mongoose) {
+    registerIpAddress(mongoose);
+}

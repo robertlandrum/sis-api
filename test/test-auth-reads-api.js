@@ -1,11 +1,11 @@
+import fs from "fs";
+import path from "path";
+import nconf from "nconf";
+import should from "should";
+import * as server from "../server.js";
+import * as TestUtil from "./fixtures/util.js";
+
 describe('Authenticated reads API', function() {
-    "use strict";
-    var fs = require("fs");
-    var path = require("path");
-    var nconf = require("nconf");
-    var should = require('should');
-    var server = require("../server");
-    var TestUtil = require('./fixtures/util');
     var ApiServer = new TestUtil.TestServer();
 
     var schema = {
@@ -18,7 +18,7 @@ describe('Authenticated reads API', function() {
     var script = {
         name : "test_auth_reads_params",
         script_type : "application/javascript",
-        script : fs.readFileSync(path.join(__dirname, "fixtures", "scripts", "params.js"), "utf8"),
+        script : fs.readFileSync(path.join(import.meta.dirname, "fixtures", "scripts", "params.js"), "utf8"),
         _sis : { owner : ["test"] }
     };
 

@@ -1,13 +1,11 @@
+import should from "should";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import ChildProcess from "child_process";
+
 describe("Tools", function() {
-    "use strict";
-
-    var should = require("should");
-    var fs = require("fs");
-    var os = require("os");
-    var path = require("path");
-    var ChildProcess = require("child_process");
-
-    var root = path.join(__dirname, "..");
+    var root = path.join(import.meta.dirname, "..");
     var samples = path.join(root, "samples");
 
     this.timeout(30000);

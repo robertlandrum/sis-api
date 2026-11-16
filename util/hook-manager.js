@@ -1,13 +1,11 @@
 
 // A class used to manage the SIS Hooks defined by the /hooks api
-'use strict';
 
-var qs = require('qs');
-var nconf = require('nconf');
-var logger = require("./logger");
-
-var SIS = require('./constants');
-var Manager = require("./manager");
+import qs from "qs";
+import nconf from "nconf";
+import * as logger from "./logger.js";
+import SIS from "./constants.js";
+import Manager from "./manager.js";
 
 var LOGGER = logger.createLogger({
     name : "HookManager"
@@ -184,11 +182,11 @@ class HookManager extends Manager {
     }
 }
 
-module.exports = function(schemaManager, opts) {
+export default function(schemaManager, opts) {
     return new HookManager(schemaManager);
-};
+}
 
 // resolves once the hook lookups running now are done
-module.exports.lookupsDone = function() {
+export function lookupsDone() {
     return Promise.all(Array.from(pendingLookups));
-};
+}

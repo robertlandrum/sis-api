@@ -1,8 +1,6 @@
+import * as util from "./fixtures/util.js";
+
 describe('Initialize Tests', function() {
-    "use strict";
-
-    var util = require('./fixtures/util');
-
     var test = null;
 
     it("Should create the test", async function() {

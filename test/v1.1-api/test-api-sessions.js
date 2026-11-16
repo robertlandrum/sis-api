@@ -1,13 +1,12 @@
+import should from "should";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import * as jose from "jose";
+import SIS from "../../util/constants.js";
+import * as TestUtil from "../fixtures/util.js";
+
 describe('@API @V1.1API - JWT sessions', function() {
-    "use strict";
-
-    var should = require('should');
-    var fs = require('fs');
-    var path = require('path');
-    var crypto = require('crypto');
-
-    var SIS = require("../../util/constants");
-    var TestUtil = require('../fixtures/util');
     var ApiServer = new TestUtil.TestServer();
 
     var serverData = null;
@@ -159,10 +158,9 @@ describe('@API @V1.1API - JWT sessions', function() {
 
         it("rejects an expired JWT", async function() {
             if (!serverData.local) { return this.skip(); }
-            var keyFile = path.join(__dirname, "..", "fixtures", "keys", "jwt-default.key");
+            var keyFile = path.join(import.meta.dirname, "..", "fixtures", "keys", "jwt-default.key");
             var key = crypto.createPrivateKey(fs.readFileSync(keyFile));
             var now = Math.floor(Date.now() / 1000);
-            var jose = await import("jose");
             var jwt = await new jose.SignJWT({ sgen : 0 })
                 .setProtectedHeader({ alg : "EdDSA", kid : "default", typ : "JWT" })
                 .setIssuer("sis").setAudience(SIS.JWT_AUDIENCE).setSubject("jwt_alice")

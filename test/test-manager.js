@@ -1,15 +1,15 @@
-describe('Manager', function() {
-    "use strict";
+import should from "should";
+import SIS from "../util/constants.js";
+import Manager from "../util/manager.js";
+import * as TestUtil from "./fixtures/util.js";
+import * as sisSchemas from "../util/sis-schemas.js";
 
+describe('Manager', function() {
     // Characterization tests for the base Manager (util/manager.js).  They pin
     // the behavior subclasses and controllers rely on - result shapes, error
     // tuples and the bulk paths - using a plain model rather than a SIS schema
     // so the base class is exercised without subclass overrides.
 
-    var SIS = require("../util/constants");
-    var Manager = require("../util/manager");
-    var should = require('should');
-    var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
 
     var MODEL_NAME = "manager_test_item";
@@ -55,7 +55,7 @@ describe('Manager', function() {
         var mongoose = await LocalTest.start();
         Model = mongoose.models[MODEL_NAME];
         if (!Model) {
-            var metaDef = Object.assign({}, require("../util/sis-schemas").metaDef);
+            var metaDef = Object.assign({}, sisSchemas.metaDef);
             metaDef.owner = { type : ["String"] };
             var schema = new mongoose.Schema({
                 name : { type : String, required : true, unique : true },

@@ -1,10 +1,8 @@
 
 // Manager for entities
 
-'use strict';
-
-var Manager = require("./manager");
-var SIS = require("./constants");
+import Manager from "./manager.js";
+import SIS from "./constants.js";
 
 // Entity manager
 class EntityManager extends Manager {
@@ -479,6 +477,6 @@ class EntityManager extends Manager {
     }
 }
 
-module.exports = function(model, schema, opts) {
+export default function(model, schema, opts) {
     return new EntityManager(model, schema, opts);
-};
+}

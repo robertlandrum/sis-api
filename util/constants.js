@@ -1,10 +1,8 @@
 // some constants and util functions
 
-'use strict';
-
-var util = require('util');
-var diff = require('jsondiffpatch');
-var logger = require("./logger");
+import util from "util";
+import diff from "jsondiffpatch";
+import * as logger from "./logger.js";
 
 var FIELD_LOCKED = "locked";
 var FIELD_IMMUTABLE = "immutable";
@@ -34,7 +32,7 @@ function describeDuplicateKey(err) {
     }).join(", ") + " already exists";
 }
 
-module.exports = {
+var SIS = {
 
     // events / actions
     EVENT_INSERT : "insert",
@@ -198,7 +196,7 @@ module.exports = {
         }
         // a unique index rejected the write
         if (isDuplicateKeyError(msg)) {
-            return module.exports.ERR_CONFLICT(describeDuplicateKey(msg));
+            return SIS.ERR_CONFLICT(describeDuplicateKey(msg));
         }
         if (!LOGGER) {
             LOGGER = logger.createLogger({ name : "ErrorLogger" });
@@ -211,11 +209,11 @@ module.exports = {
     ERR_INTERNAL_OR_NOT_FOUND : function(err, type, id, result) {
         if (err) {
             if (typeof err == 'object' && err.name == 'CastError') {
-                return module.exports.ERR_NOT_FOUND(type, id);
+                return SIS.ERR_NOT_FOUND(type, id);
             }
-            return module.exports.ERR_INTERNAL(err);
+            return SIS.ERR_INTERNAL(err);
         } else {
-            return module.exports.ERR_NOT_FOUND(type, id);
+            return SIS.ERR_NOT_FOUND(type, id);
         }
     },
     ERR_BAD_CREDS : function(msg) {
@@ -396,3 +394,5 @@ module.exports = {
         }
     }
 };
+
+export default SIS;

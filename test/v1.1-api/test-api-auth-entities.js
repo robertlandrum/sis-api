@@ -1,13 +1,9 @@
+import should from "should";
+import SIS from "../../util/constants.js";
+import * as TestUtil from "../fixtures/util.js";
+import * as AuthFixture from "../fixtures/authdata.js";
+
 describe('@API @V1.1API - Authorization API Entities', function() {
-    "use strict";
-
-    var should = require('should');
-
-    var SIS = require("../../util/constants");
-
-    var TestUtil = require('../fixtures/util');
-    var AuthFixture = require("../fixtures/authdata");
-
     var ApiServer = new TestUtil.TestServer();
 
     var users = AuthFixture.createUsers();

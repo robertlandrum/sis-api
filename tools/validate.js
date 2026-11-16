@@ -1,11 +1,10 @@
-"use strict";
+import mongoose from "mongoose";
+import nconf from "nconf";
+import fs from "fs";
+import config from "../config.js";
+import createSchemaManager from "../util/schema-manager.js";
 
 // validates a schema - and an entity against it - without a database
-var mongoose = require('mongoose');
-var nconf = require('nconf');
-var fs = require('fs');
-var config = require('../config');
-var createSchemaManager = require('../util/schema-manager');
 
 if (process.argv.length < 3) {
     console.log("Require a schema JSON file with optional entity JSON file.");
