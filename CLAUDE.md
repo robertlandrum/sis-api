@@ -60,8 +60,8 @@ almost always touch a route + a manager, not raw Express/Mongoose.
    streaming of large arrays, CAS, upsert, commit logging, and hook dispatch. Subclasses
    mostly override `getManager`, `getType`, `convertToResponseObject`, and `applyDefaults`.
 
-2. **Managers** (`util/*-manager.js`) - domain/DB layer, all subclass
-   **`util/manager.js`** (`Manager`). A Manager owns a Mongoose model and implements
+2. **Managers** (`util/*-manager.js`) - domain/DB layer, all ES classes extending
+   **`util/manager.js`** (`Manager`), except `CommitManager` and `SessionManager`. A Manager owns a Mongoose model and implements
    validation, `applyUpdate`, RBAC authorization, references/joins, and the actual
    add/update/delete/getAll operations. Controllers delegate here; managers do not know
    about HTTP.
@@ -136,9 +136,11 @@ bootstrap the first superuser, since the REST API requires an existing privilege
 ## Conventions
 
 - The code is moving to `async`/`await` ahead of an ESM conversion. The managers in
-  `util/` are converted: they use `async` methods, `try`/`catch` around awaited calls and
+  `util/` are converted: they are ES classes (`class X extends Manager`, with `super(...)`
+  and `super.method(...)`) and use `async` methods, `try`/`catch` around awaited calls and
   arrow callbacks instead of `var self = this`, and take no callbacks. The routes
-  (`routes/`) and `endpoints/` still use promise chains. Write new code the converted way
+  (`routes/`) and `endpoints/` still use constructor functions with `util.inherits` and
+  promise chains. Write new code the converted way
   and cover it in the style of `test/test-manager.js` (`async` mocha tests, with
   `TestUtil.expectError` for SIS error tuples). Results with more than one part are
   named objects, not arrays: `update`/`upsert` resolve with `{ old, updated }` (`old`
@@ -146,9 +148,10 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   `{ success, errors }`.
 - Promises are **native** (`Promise`). The small `util/promises.js` helper provides the
   idioms the code still leans on: `defer()` (replaces the old `BPromise.pending()`),
-  `nodeify(promise, cb)` and `tap(fn)` (`.then(P.tap(fn))`). When a promise chain needs `this`, capture `var self = this;`
-  and reference `self` inside callbacks (there is no bluebird `.bind(this)` anymore);
-  bare method references passed to `.then` must be `.bind(self)`.
+  `nodeify(promise, cb)` and `tap(fn)` (`.then(P.tap(fn))`). When a promise chain in
+  the unconverted code needs `this`, capture `var self = this;` and reference `self`
+  inside callbacks (there is no bluebird `.bind(this)` anymore); bare method references
+  passed to `.then` must be `.bind(self)`.
 - Mongoose 8 notes that bit during the upgrade and are worth remembering: query/model
   methods return promises (no callbacks); `ObjectId` instance strings are `"ObjectId"`;
   `strictQuery` is set to `false` (see `schema-manager.js`) so non-schema query paths
@@ -159,5 +162,5 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   mutable own-property; the query parser is forced to `extended`; routes can't use inline
   regex or optional `:id?` (the `:version` param is validated via `app.param`).
 - `lodash` v4 and `async` v3 are the utility libs; keep `"use strict"` at the top of each
-  module and match the surrounding ES5-style code.
+  module and match the style of the surrounding code (it still uses `var`).
 - API docs live in `docs/*.md`; `samples/` holds example schema/entity/hook JSON payloads.
