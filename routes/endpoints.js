@@ -175,7 +175,6 @@ class EndpointWorker {
 // - Note that this runs in the main process
 class EndpointController {
     constructor(config) {
-        this.requestQueue = [];
         this.authReads = !!config[SIS.OPT_AUTH_READS];
         // create the pool of workers.  generic-pool v3 uses a promise-based
         // factory + createPool() rather than the v2 callback style.
@@ -217,53 +216,50 @@ class EndpointController {
         }
         router.use("/:id/", this.handler.bind(this));
         app.use(base, router);
-        var self = this;
-        app.locals.closeListeners.push(function() {
+        app.locals.closeListeners.push(async () => {
             LOGGER.info("Draining pool");
-            self.workerPool.drain().then(function() {
-                return self.workerPool.clear();
-            });
+            try {
+                await this.workerPool.drain();
+                await this.workerPool.clear();
+            } catch (err) {
+                LOGGER.error({ err : err }, "Error draining the pool");
+            }
         });
     }
 
-    handler(req, res) {
-        this.requestQueue.push({ req : req, res : res });
-        this._runNext();
-    }
-
-    _runNext() {
-        if (!this.requestQueue.length) {
-            return;
-        }
-        var req = this.requestQueue.pop();
-        var res = req.res;
-        var self = this;
-        this.workerPool.acquire().then(function(worker) {
-            var p = worker.handleRequest(req);
-            return p.then(function(data) {
-                res.status(data.status);
-                res.set(data.headers);
-                res.send(data.data);
-                self.workerPool.release(worker);
-            }).catch(function(err) {
-                if (err instanceof Error) {
-                    // the stack goes to the log, not to the client
-                    LOGGER.error({ err: err }, "Endpoint caught an error");
-                    err = {
-                        status : 500,
-                        error : String(err)
-                    };
-                }
-                // timeout or exception
-                // errors from the script should be sent properly
-                res.status(500).json(err);
-                // always destroy badness - let the pool spin up another
-                self.workerPool.destroy(worker);
-            });
-        }).catch(function(err) {
+    // Run the request in a script process
+    async handler(req, res) {
+        var worker;
+        try {
+            worker = await this.workerPool.acquire();
+        } catch (err) {
             LOGGER.error({ err : err }, "Unable to get a script process");
             res.status(500).json({ error : "Unable to run script.  Internal error", status : 500 });
-        });
+            return;
+        }
+        try {
+            var data = await worker.handleRequest({ req : req, res : res });
+            res.status(data.status);
+            res.set(data.headers);
+            res.send(data.data);
+            this.workerPool.release(worker);
+        } catch (err) {
+            if (err instanceof Error) {
+                // the stack goes to the log, not to the client
+                LOGGER.error({ err: err }, "Endpoint caught an error");
+                err = {
+                    status : 500,
+                    error : String(err)
+                };
+            }
+            // timeout or exception
+            // errors from the script should be sent properly
+            res.status(500).json(err);
+            // always destroy badness - let the pool spin up another
+            this.workerPool.destroy(worker).catch(function(e) {
+                LOGGER.error({ err : e }, "Error destroying a script process");
+            });
+        }
     }
 }
 

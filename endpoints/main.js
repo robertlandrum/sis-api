@@ -25,41 +25,42 @@ function sendResponse(res) {
     });
 }
 
-var opts = nconf.get('db').opts || { };
-Promise.resolve(mongoose.connect(nconf.get('db').url, opts))
-.then(function() {
+// Run the request and send the response back
+async function handleRequest(runner, data) {
+    try {
+        sendResponse(await runner.handleRequest(data));
+    } catch (err) {
+        var status = err.status || 500;
+        if (Array.isArray(err)) {
+            status = err[0];
+            err = err[1];
+        }
+        sendResponse({
+            status : status,
+            data : JSON.stringify(err),
+            headers : { "Content-Type" : "application/json" }
+        });
+    }
+}
+
+// Connect, then tell the parent the process is ready for requests
+async function start() {
+    var opts = nconf.get('db').opts || { };
+    await mongoose.connect(nconf.get('db').url, opts);
     var appConfig = nconf.get('app') || { };
     var schemaManager = require('../util/schema-manager')(mongoose, appConfig);
-    return schemaManager.bootstrapEntitySchemas().then(function() {
-        return schemaManager;
-    });
-}).then(function(schemaManager) {
+    await schemaManager.bootstrapEntitySchemas();
     var ScriptRunner = require('./runner');
     var runner = new ScriptRunner(schemaManager);
     process.on("message", function(msg) {
-        var type = msg.type;
-        var data = msg.data;
-        if (type === SIS.EP_REQ) {
-            runner.handleRequest(data)
-            .then(function(res) {
-                sendResponse(res);
-            }).catch(function(err) {
-                var status = err.status || 500;
-                if (Array.isArray(err)) {
-                    status = err[0];
-                    err = err[1];
-                }
-                var res = {
-                    status : status,
-                    data : JSON.stringify(err),
-                    headers : { "Content-Type" : "application/json" }
-                };
-                sendResponse(res);
-            });
+        if (msg.type === SIS.EP_REQ) {
+            handleRequest(runner, msg.data);
         }
     });
     process.send({ type : SIS.EP_READY });
-}).catch(function(err) {
+}
+
+start().catch(function(err) {
     console.log(err);
     process.send({ type : SIS.EP_ERROR, data : err });
 });

@@ -26,8 +26,8 @@ class TokenController extends ApiController {
         this.userManager = this.sm.auth[SIS.SCHEMA_USERS];
     }
 
-    getManager(req) {
-        return Promise.resolve(this.sm.getTokenManagerForUser(req.params.uid));
+    async getManager(req) {
+        return this.sm.getTokenManagerForUser(req.params.uid);
     }
 
     // Append the query parameter to be that of the user

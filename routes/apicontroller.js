@@ -61,15 +61,14 @@ class ApiController {
     }
 
     // overrides
-    // Returns a promise that returns a Manager instance.
+    // Resolves with the Manager of the request.
     // Subclasses can assign a manager to the 'manager' property.
-    getManager(req) {
-        if (this.manager) {
-            req.useLean = true;
-            return Promise.resolve(this.manager);
-        } else {
-            return Promise.reject(SIS.ERR_INTERNAL("Error fetching object"));
+    async getManager(req) {
+        if (!this.manager) {
+            throw SIS.ERR_INTERNAL("Error fetching object");
         }
+        req.useLean = true;
+        return this.manager;
     }
 
     // Get the type of object from the request

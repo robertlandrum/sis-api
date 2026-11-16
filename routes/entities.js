@@ -20,15 +20,12 @@ class EntityController extends ApiController {
 
     // overrides
     // Get the manager to handle this query
-    getManager(req) {
+    async getManager(req) {
         // Get the latest
-        var name = this.getType(req);
-        return this.sm.getEntityManager(name, this.opts)
-        .then(function(manager) {
-            req.sisManager = manager;
-            req.useLean = manager.model.schema._sis_defaultpaths.length === 0;
-            return manager;
-        });
+        var manager = await this.sm.getEntityManager(this.getType(req), this.opts);
+        req.sisManager = manager;
+        req.useLean = manager.model.schema._sis_defaultpaths.length === 0;
+        return manager;
     }
 
     convertToResponseObject(req, obj) {

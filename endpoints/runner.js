@@ -53,31 +53,20 @@ class ScriptRunner {
         this.scriptCache = { };
     }
 
-    _getScript(name) {
-        var self = this;
-        return this.manager.getById(name, { lean : true })
-        .then(function(scriptObj) {
-            var scriptText = scriptObj.script;
-            LOGGER.info("have script", { script: scriptText });
-            var cached = self.scriptCache[name];
-            var scriptTime = scriptObj._sis._updated_at;
-            var compiled = null;
-            if (!cached) {
-                compiled = new vm.Script(scriptText, { filename: name });
-                self.scriptCache[name] = {
-                    script : compiled,
-                    time : scriptTime
-                };
-                return compiled;
-            } else {
-                if (scriptObj._sis._updated_at > cached.time) {
-                    compiled = new vm.Script(scriptText, { filename: name });
-                    cached.script = compiled;
-                    cached.time = scriptTime;
-                }
-                return cached.script;
-            }
-        });
+    // Resolves with the compiled script, compiling it again once it changed
+    async _getScript(name) {
+        var scriptObj = await this.manager.getById(name, { lean : true });
+        LOGGER.debug({ script : name }, "Running script");
+        var scriptTime = scriptObj._sis._updated_at;
+        var cached = this.scriptCache[name];
+        if (!cached || scriptTime > cached.time) {
+            cached = {
+                script : new vm.Script(scriptObj.script, { filename: name }),
+                time : scriptTime
+            };
+            this.scriptCache[name] = cached;
+        }
+        return cached.script;
     }
 
     _createContext(holder, req) {
@@ -94,23 +83,17 @@ class ScriptRunner {
         return vm.createContext(clone(ctx));
     }
 
-    handleRequest(req) {
-        var self = this;
+    // Run the script of the request.  Resolves with the response it sends.
+    async handleRequest(req) {
         var endpoint = req.endpoint;
-        return this._getScript(endpoint)
-        .then(function(script) {
+        try {
+            var script = await this._getScript(endpoint);
             var defer = P.defer();
-            var holder = new ResponseHolder(defer);
-            var ctx = self._createContext(holder, req);
-            script.runInNewContext(ctx);
-            return defer.promise;
-        })
-        .then(function(holder) {
-            return holder.response;
-        })
-        .catch(function(err) {
+            script.runInNewContext(this._createContext(new ResponseHolder(defer), req));
+            return (await defer.promise).response;
+        } catch (err) {
             if (Array.isArray(err)) {
-                return Promise.reject(err);
+                throw err;
             }
             LOGGER.error({ err : err, endpoint : endpoint }, "Script error");
             // the client gets the error and where in the script it happened,
@@ -120,8 +103,8 @@ class ScriptRunner {
             }).map(function(line) {
                 return line.trim();
             });
-            return Promise.reject(SIS.ERR_INTERNAL([String(err)].concat(scriptLines).join("\n")));
-        });
+            throw SIS.ERR_INTERNAL([String(err)].concat(scriptLines).join("\n"));
+        }
     }
 }
 
