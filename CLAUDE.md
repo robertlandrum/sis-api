@@ -180,6 +180,11 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   regex or optional `:id?` (the `:version` param is validated via `app.param`).
 - `lodash` v4 is the utility lib; match the style of the surrounding code (it still
   uses `var`).
+- Types are JSDoc, checked by `npm run typecheck`. The shapes shared across layers have
+  typedefs: `SisError` (`util/constants.js`) and `ManagerOptions`, `UpdateResult` and
+  `BulkResult` (`util/manager.js`) - use them in the JSDoc of new code, e.g.
+  `@returns {Promise<UpdateResult>}`. Dependencies without their own types get an
+  `@types/*` dev dependency.
 - The local modules import each other without cycles - keep it that way. Imports load
   before a module's body runs, so do not read the configuration (`nconf`) while a module
   loads; loggers from `logger.createLogger` are made when first used, so creating them

@@ -4,6 +4,45 @@ import _ from "lodash";
 import SIS from "./constants.js";
 import * as logger from "./logger.js";
 
+/**
+ * The options of a manager operation, as the controllers pass them
+ * @typedef {Object} ManagerOptions
+ * @property {Object} [user] - the SIS user doing it
+ * @property {string} [version] - the API version, such as "v1.1"
+ * @property {Object} [cas] - update only if the stored object matches this condition
+ * @property {boolean} [allOrNone] - bulk add: add nothing unless everything can be
+ * @property {boolean} [forceMixed] - replace Mixed fields instead of merging into them
+ * @property {boolean} [lean] - resolve with plain objects instead of documents
+ * @property {string} [populate] - the paths to populate, space separated
+ * @property {number} [skip]
+ * @property {number} [limit]
+ * @property {Object} [sort]
+ * @property {string} [read] - the read preference
+ * @property {Object} [query] - the query of the request (the schema manager
+ *     reads with_counts from it)
+ * @property {Object} [params] - the params of the request
+ * @property {Object} [log] - the logger of the request
+ */
+
+/**
+ * What update and upsert resolve with
+ * @typedef {Object} UpdateResult
+ * @property {Object | null} old - the object before the update, as a plain
+ *     object - null when upsert added it
+ * @property {any} updated - the object after the update
+ */
+
+/**
+ * What the bulk operations resolve with
+ * @typedef {Object} BulkResult
+ * @property {any[]} success - the objects added, the UpdateResult of each
+ *     object updated, or the objects deleted
+ * @property {{ err : import("./constants.js").SisError, value : any }[]} errors -
+ *     each item that failed, and why
+ * @property {import("./constants.js").SisError} [internalErr] - bulkAdd: the
+ *     error the database gave when the insert partially failed
+ */
+
 var LOGGER = logger.createLogger({
     name : "Manager"
 });
@@ -95,19 +134,34 @@ class Manager {
         return result;
     }
 
-    // get a single object by id.
+    /**
+     * get a single object by id.
+     * @param {any} id
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<any>}
+     */
     getById(id, options) {
         var q = {}; q[this.idField] = id;
         return this.getSingleByCondition(q, id, options);
     }
 
-    // get all the objects belonging to the model.
+    /**
+     * get all the objects belonging to the model.
+     * @param {Object} condition - a mongo query
+     * @param {ManagerOptions} [options]
+     * @param {string} [fields] - the fields to select, space separated
+     * @returns {Promise<any[]>}
+     */
     async getAll(condition, options, fields) {
         return this.model.find(condition, fields, this._getFindOptions(options)).exec();
     }
 
-    // Count the number of objects specified by the query
-    // Resolves with the count - a failed count is 0.
+    /**
+     * Count the number of objects specified by the query
+     * Resolves with the count - a failed count is 0.
+     * @param {Object} condition - a mongo query
+     * @returns {Promise<number>}
+     */
     async count(condition) {
         var count = 0;
         try {
@@ -199,7 +253,12 @@ class Manager {
         return mergedDoc;
     }
 
-    // Ensures the user can add the object and then add it
+    /**
+     * Ensures the user can add the object and then add it
+     * @param {Object} obj
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<any>}
+     */
     async add(obj, options) {
         options = this._getDefaultOptions(options);
         var user = options.user;
@@ -215,10 +274,15 @@ class Manager {
         return this._save(doc);
     }
 
-    // Add many objects at once.  Resolves with { success, errors } where
-    // errors are { err, value }.  With options.allOrNone, nothing is added
-    // unless everything can be.  If the insert itself partially fails,
-    // internalErr holds the error the database gave.
+    /**
+     * Add many objects at once.  Resolves with { success, errors } where
+     * errors are { err, value }.  With options.allOrNone, nothing is added
+     * unless everything can be.  If the insert itself partially fails,
+     * internalErr holds the error the database gave.
+     * @param {Object[]} items
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<BulkResult>}
+     */
     async bulkAdd(items, options) {
         options = this._getDefaultOptions(options);
         var user = options.user;
@@ -421,8 +485,14 @@ class Manager {
         return obj[this.idField] == id;
     }
 
-    // Update the object if it exists, otherwise add it.  Resolves with
-    // { old, updated } like update - old is null when the object was added.
+    /**
+     * Update the object if it exists, otherwise add it.  Resolves with
+     * { old, updated } like update - old is null when the object was added.
+     * @param {any} id
+     * @param {Object} obj
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<UpdateResult>}
+     */
     async upsert(id, obj, options) {
         options = this._getDefaultOptions(options);
         try {
@@ -436,8 +506,14 @@ class Manager {
         return this.update(id, obj, options);
     }
 
-    // Ensures the user can update the object and then update it.
-    // Resolves with { old, updated } (see _update).
+    /**
+     * Ensures the user can update the object and then update it.
+     * Resolves with { old, updated } (see _update).
+     * @param {any} id
+     * @param {Object} obj
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<UpdateResult>}
+     */
     update(id, obj, options) {
         options = this._getDefaultOptions(options);
         var cas = options.cas;
@@ -449,16 +525,27 @@ class Manager {
         return this._update(id, obj, options, saveFunc);
     }
 
-    // Update every object matching condition with obj.  Resolves with
-    // { success, errors } where success holds what update resolved with.
-    // Note bulk updates are horribly inefficient at the moment
+    /**
+     * Update every object matching condition with obj.  Resolves with
+     * { success, errors } where success holds what update resolved with.
+     * Note bulk updates are horribly inefficient at the moment
+     * @param {Object} condition - a mongo query
+     * @param {Object} obj
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<BulkResult>}
+     */
     async bulkUpdateQuery(condition, obj, options) {
         var items = await this.getAll(condition, { lean : true }, this.idField);
         return this._updateEach(items, function() { return obj; }, options);
     }
 
-    // Update each object in items, identified by its id field.  Resolves with
-    // { success, errors } where success holds what update resolved with.
+    /**
+     * Update each object in items, identified by its id field.  Resolves with
+     * { success, errors } where success holds what update resolved with.
+     * @param {Object[]} items
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<BulkResult>}
+     */
     bulkUpdateArray(items, options) {
         return this._updateEach(items, function(item) { return item; }, options);
     }
@@ -482,8 +569,13 @@ class Manager {
         return memo;
     }
 
-    // Ensures the user can delete the object and then delete it.
-    // Resolves with the deleted object.
+    /**
+     * Ensures the user can delete the object and then delete it.
+     * Resolves with the deleted object.
+     * @param {any} id
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<any>}
+     */
     async delete(id, options) {
         options = this._getDefaultOptions(options);
         var obj = SIS.ENSURE_SIS_META(await this.getById(id, { lean : true }));
@@ -493,8 +585,13 @@ class Manager {
         return removed;
     }
 
-    // Delete every object matching condition.  Resolves with { success, errors }
-    // where success holds what objectRemoved resolved with for each deleted object.
+    /**
+     * Delete every object matching condition.  Resolves with { success, errors }
+     * where success holds what objectRemoved resolved with for each deleted object.
+     * @param {Object} condition - a mongo query
+     * @param {ManagerOptions} [options]
+     * @returns {Promise<BulkResult>}
+     */
     async bulkDelete(condition, options) {
         options = this._getDefaultOptions(options);
         var user = options.user;
