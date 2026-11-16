@@ -39,7 +39,7 @@ More details can be found in the [API Documentation](./docs/index.md)
 
 The following are required to build and run SIS:
 
-- [Node.js](https://nodejs.org/) 20.11 or later (see the `engines` field in `package.json`).
+- [Node.js](https://nodejs.org/) 22 or later (see the `engines` field in `package.json`).
 - [MongoDB](https://www.mongodb.org/) 4.4+ (tested against MongoDB 7).
 
 If you would rather not install these locally, see
@@ -68,6 +68,10 @@ The available npm scripts are:
 - `npm run coverage` - run the test suite under `c8` and emit an HTML + text report.
 - `npm run build` - generate `build.json` (consumed by the `/info` endpoint).
 - `npm run gen-jwt-key [kid]` - generate an Ed25519 key pair in `conf/keys/` for signing session tokens.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the lint and the test suite, on
+Node 22 and 24 against MongoDB 7, for every push to `develop` or `main` and every
+pull request.
 
 ## Running the tests
 

@@ -256,8 +256,15 @@ describe("@API @V1.1API - Scripts API", function() {
                 return this.skip();
             }
             (await get("/").expect(200)).text.should.eql("ok");
-            let pids = ChildProcess.execSync("pgrep -P " + process.pid + " -f endpoints/main.js || true")
-                .toString().split("\n").filter(Boolean);
+            // run pgrep itself, not through a shell: the shell would be one of
+            // our children with endpoints/main.js in its command line
+            let found = "";
+            try {
+                found = ChildProcess.execFileSync("pgrep", ["-P", String(process.pid), "-f", "endpoints/main.js"]);
+            } catch (err) {
+                // pgrep exits with 1 when nothing matches
+            }
+            let pids = String(found).split("\n").filter(Boolean);
             pids.length.should.be.above(0);
             pids.forEach(function(pid) { process.kill(Number(pid), "SIGKILL"); });
             await new Promise(function(resolve) { setTimeout(resolve, 200); });
