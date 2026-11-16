@@ -18,38 +18,31 @@ class UserController extends ApiController {
 
     // extend attach to also attach the session token routes
     attach(app, prefix) {
-        var self = this;
         var apiPrefix = "/api/:version" + prefix;
         this.auth_token_path = apiPrefix + "/auth_token";
         if (!app.get(SIS.OPT_READONLY)) {
             // logout: ends every session of the authenticated user.  Registered
             // before the base routes so DELETE /users/:id does not capture it.
-            app.delete(this.auth_token_path, function(req, res) {
-                var p = self.authenticate(req, res, SIS.SCHEMA_TOKENS).then(function(user) {
-                    return self.manager.endSessions(user[SIS.FIELD_NAME]);
-                });
-                p.then(function() {
-                    res.status(204).end();
-                }).catch(function(err) {
-                    self.sendError(res, err);
-                });
-            });
+            app.delete(this.auth_token_path, this._handler(async function(req, res) {
+                var user = await this.authenticate(req, res, SIS.SCHEMA_TOKENS);
+                await this.manager.endSessions(user[SIS.FIELD_NAME]);
+                res.status(204).end();
+            }, false));
         }
         super.attach(app, prefix);
         // login: exchange Basic credentials for a JWT session token
-        app.post(this.auth_token_path, function(req, res) {
+        app.post(this.auth_token_path, this._handler(async function(req, res) {
             // cors support
             res.set('Access-Control-Allow-Credentials', true);
             req.isAuthTokenReq = true;
-            var p = self.authenticate(req, res, 'basic').then(function(user) {
-                if (!self.sessionManager) {
-                    return Promise.reject(SIS.ERR_INTERNAL("Session tokens are not configured."));
+            await this._finish(req, res, 201, async () => {
+                var user = await this.authenticate(req, res, 'basic');
+                if (!this.sessionManager) {
+                    throw SIS.ERR_INTERNAL("Session tokens are not configured.");
                 }
-                return self.sessionManager.issue(user);
+                return this.sessionManager.issue(user);
             });
-            // hacky
-            return self._finish(req, res, p, 201);
-        });
+        }, false));
     }
 
     // No password hashes or server managed fields should be returned.

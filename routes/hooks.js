@@ -18,12 +18,11 @@ class HookController extends ApiController {
     attach(app, prefix) {
         super.attach(app, prefix);
         var triggerPath = this.apiPrefix + "/trigger/:schema/:id";
-        app.post(triggerPath, this._wrapAuth(function(req, res) {
+        app.post(triggerPath, this._wrapAuth(async function(req, res) {
             var options = this._getReqOptions(req);
-            var id = req.params.id;
-            var schema = req.params.schema;
-            var p = this.manager.triggerHooks(schema, id, options);
-            return this._finish(req, res, p, 200);
+            await this._finish(req, res, 200, () => {
+                return this.manager.triggerHooks(req.params.schema, req.params.id, options);
+            });
         }));
     }
 

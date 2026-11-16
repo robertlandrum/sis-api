@@ -71,29 +71,21 @@ class TokenController extends ApiController {
     // Wrap the token API to ensure the user requesting it
     // is allowed to
     wrapApi() {
-        var self = this;
-        // takes in an api controller function(req, res), and
-        // returns a wrapper around it
-        var wrapFunc = function(func) {
-            return function(req, res) {
-                self.ensureUser(req).then(function(user) {
-                    req[SIS.FIELD_TOKEN_USER] = user;
-                    fixBody(req);
-                    // need to ensure that only admins of the user
-                    // super users, or the user himself are
-                    // getting the tokens
-                    var p = self.authenticate(req, res, SIS.SCHEMA_TOKENS);
-                    return p.then(function(auth) {
-                        if (self.sm.tokenFetcher.canAdministerTokensOf(req.user, user)) {
-                            func.call(self, req, res);
-                        } else {
-                            return self.sendError(res, SIS.ERR_BAD_CREDS("Cannot read tokens for user."));
-                        }
-                    });
-                })
-                .catch(function(err) {
-                    return self.sendError(res, err);
-                });
+        // takes in an api controller function(req, res), and returns a
+        // wrapper around it.  attach wraps it again, sending what it throws.
+        var wrapFunc = (func) => {
+            return async (req, res) => {
+                var user = await this.ensureUser(req);
+                req[SIS.FIELD_TOKEN_USER] = user;
+                fixBody(req);
+                // need to ensure that only admins of the user
+                // super users, or the user himself are
+                // getting the tokens
+                await this.authenticate(req, res, SIS.SCHEMA_TOKENS);
+                if (!this.sm.tokenFetcher.canAdministerTokensOf(req.user, user)) {
+                    throw SIS.ERR_BAD_CREDS("Cannot read tokens for user.");
+                }
+                await func.call(this, req, res);
             };
         };
         var apis = ['get', 'getAll', 'update', 'add', 'delete'];

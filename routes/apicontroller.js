@@ -1,53 +1,30 @@
 'use strict';
 
 var SIS = require("../util/constants");
-var P = require("../util/promises");
 var webUtil = require("./webutil");
 var nconf = require("nconf");
-var _ = require("lodash");
 
 var CHUNK_SIZE = 100;
 
-function writeJSONArrayChunk(res, array, cStart, cSize, defer) {
-    var slice = null;
-    var mapped = null;
-    var jsonStr = null;
-    if (cStart + cSize >= array.length) {
-        // last chunk
-        slice = array.slice(cStart);
-        jsonStr = JSON.stringify(slice);
-        if (cStart === 0) {
-            res.write(jsonStr);
-        } else {
-            res.write(jsonStr.substring(1));
-        }
-        defer.resolve(res);
-    } else {
-        // intermediate chunk
-        slice = array.slice(cStart, cStart + cSize);
-        jsonStr = JSON.stringify(slice);
-        if (cStart === 0) {
-            res.write(jsonStr.substring(0, jsonStr.length - 1));
-        } else {
-            res.write(jsonStr.substring(1, jsonStr.length - 1));
-        }
-        // add trailing comma
-        res.write(",");
-        setImmediate(function() {
-            writeJSONArrayChunk(res, array, cStart + cSize, cSize, defer);
-        });
-    }
-}
-
-function writeJSONArray(res, array) {
-    var d = P.defer();
+// Write the array to the response as JSON - a chunk at a time, letting the
+// event loop run between the chunks of a large array
+async function writeJSONArray(res, array) {
     if (!array.length) {
         res.write("[]");
-        d.resolve(res);
-    } else {
-        writeJSONArrayChunk(res, array, 0, CHUNK_SIZE, d);
+        return;
     }
-    return d.promise;
+    for (var start = 0; start < array.length; start += CHUNK_SIZE) {
+        if (start) {
+            await new Promise(function(resolve) { setImmediate(resolve); });
+        }
+        var json = JSON.stringify(array.slice(start, start + CHUNK_SIZE));
+        var last = start + CHUNK_SIZE >= array.length;
+        // drop the brackets where the chunks meet
+        res.write(json.substring(start ? 1 : 0, last ? json.length : json.length - 1));
+        if (!last) {
+            res.write(",");
+        }
+    }
 }
 
 // The controller base attaches to an express app and
@@ -125,6 +102,13 @@ class ApiController {
     // The err is usually an object returned via
     // SIS.ERR_* functions/properties
     sendError(res, err) {
+        if (res.headersSent) {
+            // too late to tell the client - e.g. a failure while streaming
+            if (res.log) {
+                res.log.error({ err : err }, "Error after the response was started");
+            }
+            return;
+        }
         if (!(err instanceof Array) || err.length < 2) {
             if (res.log) {
                 res.log.error(err);
@@ -135,30 +119,23 @@ class ApiController {
         res.status(err[0]).send(err[1]);
     }
 
-    // Send a response with the specified code and data
-    sendObject(res, code, obj, isBulk) {
+    // Send a response with the specified code and data.  Resolves once it
+    // is written.
+    async sendObject(res, code, obj, isBulk) {
         res.setHeader("Content-Type","application/json");
         res.status(code);
         if (isBulk) {
             res.setHeader("X-Accel-Buffering","no");
             res.write('{"success":');
-            writeJSONArray(res, obj.success).then(function(res) {
-                res.write(',"errors":');
-                return writeJSONArray(res, obj.errors);
-            }).then(function(res) {
-                res.write("}");
-                res.end();
-            });
-        } else if (Array.isArray(obj)) {
-            if (obj.length < CHUNK_SIZE) {
-                // just send
-                res.send(obj);
-            } else {
-                res.setHeader("X-Accel-Buffering","no");
-                writeJSONArray(res, obj).then(function(res) {
-                    res.end();
-                });
-            }
+            await writeJSONArray(res, obj.success);
+            res.write(',"errors":');
+            await writeJSONArray(res, obj.errors);
+            res.write("}");
+            res.end();
+        } else if (Array.isArray(obj) && obj.length >= CHUNK_SIZE) {
+            res.setHeader("X-Accel-Buffering","no");
+            await writeJSONArray(res, obj);
+            res.end();
         } else {
             res.send(obj);
         }
@@ -194,157 +171,132 @@ class ApiController {
         return webUtil.parsePopulate(req.query);
     }
 
+    // Set options.populate to the paths the request wants populated
+    async _setPopulate(req, mgr, options) {
+        var populate = this.parsePopulate(req);
+        if (!populate) {
+            return;
+        }
+        var populateFields = await mgr.getPopulateFields(this.sm, populate);
+        if (populateFields) {
+            options.populate = populateFields;
+        }
+    }
+
     // Handler for the getAll request (typically GET controller_base/)
-    getAll(req, res) {
-        var self = this;
-        self.applyDefaults(req);
-        var rq = self._parseValidQuery(req, res);
+    async getAll(req, res) {
+        this.applyDefaults(req);
+        var rq = this._parseValidQuery(req, res);
         if (!rq) {
             return;
         }
-        var options = self._getReqOptions(req);
+        var options = this._getReqOptions(req);
         options.skip = rq.offset;
         options.limit = rq.limit;
         if (rq.sort) {
             options.sort = rq.sort;
         }
-        var fields = rq.fields;
-        var condition = rq.query;
-        var p = self.getManager(req).then(function(mgr) {
-            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
-                return mgr.count(flattenedCondition).then(function(c) {
-                    res.setHeader(SIS.HEADER_TOTAL_COUNT, c);
-                    if (!c || c <= options.skip) {
-                        return [];
-                    }
-                    options.lean = req.useLean;
-                    var populate = self.parsePopulate(req);
-                    if (populate) {
-                        return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
-                            if (populateFields) {
-                                options.populate = populateFields;
-                            }
-                            return mgr.getAll(flattenedCondition, options, fields);
-                        });
-                    } else {
-                        return mgr.getAll(flattenedCondition, options, fields);
-                    }
-                });
-            });
+        await this._finish(req, res, 200, async () => {
+            var mgr = await this.getManager(req);
+            var condition = await webUtil.flattenCondition(rq.query, this.sm, mgr);
+            var count = await mgr.count(condition);
+            res.setHeader(SIS.HEADER_TOTAL_COUNT, count);
+            if (!count || count <= options.skip) {
+                return [];
+            }
+            options.lean = req.useLean;
+            await this._setPopulate(req, mgr, options);
+            return mgr.getAll(condition, options, rq.fields);
         });
-        self._finish(req, res, p, 200);
     }
 
     // Handler for the get request (typically GET controller_base/:id)
-    get(req, res) {
-        var self = this;
-        self.applyDefaults(req);
-        var id = req.params.id;
-        var p = self.getManager(req).then(function(mgr) {
-            var options = self._getReqOptions(req);
+    async get(req, res) {
+        this.applyDefaults(req);
+        await this._finish(req, res, 200, async () => {
+            var mgr = await this.getManager(req);
+            var options = this._getReqOptions(req);
             options.lean = req.useLean;
-            var populate = self.parsePopulate(req);
-            if (populate) {
-                return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
-                    if (populateFields) {
-                        options.populate = populateFields;
-                    }
-                    return mgr.getById(id, options);
-                });
-            } else {
-                return mgr.getById(id, options);
-            }
+            await this._setPopulate(req, mgr, options);
+            return mgr.getById(req.params.id, options);
         });
-
-        self._finish(req, res, p, 200);
     }
 
     // Handler for the delete request (typically DELETE controller_base/:id)
-    delete(req, res) {
-        var self = this;
-        self.applyDefaults(req);
+    async delete(req, res) {
+        this.applyDefaults(req);
         var id = req.params.id;
-        var p = null;
-        var options = self._getReqOptions(req);
+        var options = this._getReqOptions(req);
         if (id) {
-            p = self.getManager(req).then(function(mgr) {
+            await this._finish(req, res, 200, async () => {
+                var mgr = await this.getManager(req);
                 return mgr.delete(id, options);
             });
-            self._finish(req, res, p, 200);
-        } else {
-            // bulk delete - query is required
-            req.params.isBulk = true;
-            var rq = self._parseValidQuery(req, res);
-            if (!rq) {
-                return;
-            }
-            var condition = rq.query;
-            if (!condition || !Object.keys(condition).length) {
-                self.sendError(res, SIS.ERR_BAD_REQ("Bulk delete requires a non empty query."));
-                return;
-            }
-            p = self.getManager(req).then(function(mgr) {
-                return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
-                    // delegate to mgr
-                    return mgr.bulkDelete(flattenedCondition, options);
-                });
-            });
-            self._finish(req, res, p, 200);
+            return;
         }
+        // bulk delete - query is required
+        req.params.isBulk = true;
+        var rq = this._parseValidQuery(req, res);
+        if (!rq) {
+            return;
+        }
+        if (!Object.keys(rq.query).length) {
+            this.sendError(res, SIS.ERR_BAD_REQ("Bulk delete requires a non empty query."));
+            return;
+        }
+        await this._finish(req, res, 200, async () => {
+            var mgr = await this.getManager(req);
+            var condition = await webUtil.flattenCondition(rq.query, this.sm, mgr);
+            return mgr.bulkDelete(condition, options);
+        });
     }
 
-    bulkUpdate(req, res) {
-        var self = this;
+    async bulkUpdate(req, res) {
         // either an array of objects or a query with an object to set
         var obj = req.body;
-        var options = self._getReqOptions(req);
-        var p = null;
+        var options = this._getReqOptions(req);
         req.params.isBulk = true;
         if (Array.isArray(obj)) {
             if (!obj.length) {
-                return self.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
+                return this.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
             }
             // array of individual objects
-            p = self.getManager(req).then(function(mgr) {
+            await this._finish(req, res, 200, async () => {
+                var mgr = await this.getManager(req);
                 return mgr.bulkUpdateArray(obj, options);
             });
-        } else {
-            if (typeof obj !== "object") {
-                return self.sendError(res, SIS.ERR_BAD_REQ("Bulk update requires array or object as body"));
-            }
-            var rq = self._parseValidQuery(req, res);
-            if (!rq) {
-                return;
-            }
-            var condition = rq.query;
-            if (!condition || !Object.keys(condition).length) {
-                return self.sendError(res, SIS.ERR_BAD_REQ("A valid query is required"));
-            }
-            if (!Object.keys(obj).length) {
-                return self.sendError(res, SIS.ERR_BAD_REQ("Body should not be empty"));
-            }
-            p = self.getManager(req).then(function(mgr) {
-                return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
-                    return mgr.bulkUpdateQuery(flattenedCondition, obj, options);
-                });
-            });
+            return;
         }
-        return self._finish(req, res, p, 200);
+        if (typeof obj !== "object") {
+            return this.sendError(res, SIS.ERR_BAD_REQ("Bulk update requires array or object as body"));
+        }
+        var rq = this._parseValidQuery(req, res);
+        if (!rq) {
+            return;
+        }
+        if (!Object.keys(rq.query).length) {
+            return this.sendError(res, SIS.ERR_BAD_REQ("A valid query is required"));
+        }
+        if (!Object.keys(obj).length) {
+            return this.sendError(res, SIS.ERR_BAD_REQ("Body should not be empty"));
+        }
+        await this._finish(req, res, 200, async () => {
+            var mgr = await this.getManager(req);
+            var condition = await webUtil.flattenCondition(rq.query, this.sm, mgr);
+            return mgr.bulkUpdateQuery(condition, obj, options);
+        });
     }
 
     // Handler for the update request (typically PUT controller_base:/id)
-    update(req, res) {
-        var self = this;
-        self.applyDefaults(req);
+    async update(req, res) {
+        this.applyDefaults(req);
         var id = req.params.id;
         var obj = req.body;
-        var upsert = self.parseUpsert(req);
-        var p = null;
-        var options = self._getReqOptions(req);
-        var cas;
+        var upsert = this.parseUpsert(req);
+        var options = this._getReqOptions(req);
         options.forceMixed = req.query.forceMixed;
         if ('cas' in req.query) {
-            cas = req.query.cas;
+            var cas = req.query.cas;
             try {
                 if (typeof cas === 'string') {
                     cas = JSON.parse(cas);
@@ -356,26 +308,19 @@ class ApiController {
                 cas instanceof Array ||
                 !Object.keys(cas).length) {
                 // invalid query
-                return self.sendError(res, SIS.ERR_BAD_REQ("CAS condition must be an object."));
+                return this.sendError(res, SIS.ERR_BAD_REQ("CAS condition must be an object."));
             }
             options.cas = cas;
         }
-        if (upsert) {
-            p = self.getManager(req).then(function(mgr) {
-                return mgr.upsert(id, obj, options);
-            });
-        } else {
-            p = self.getManager(req).then(function(mgr) {
-                return mgr.update(id, obj, options);
-            });
-        }
-        self._finish(req, res, p, 200);
+        await this._finish(req, res, 200, async () => {
+            var mgr = await this.getManager(req);
+            return upsert ? mgr.upsert(id, obj, options) : mgr.update(id, obj, options);
+        });
     }
 
     // Handler for the add request (typically POST controller_base:/)
-    add(req, res) {
-        var self = this;
-        self.applyDefaults(req);
+    async add(req, res) {
+        this.applyDefaults(req);
         var body = req.body;
         if (body instanceof Array) {
             req.params.isBulk = true;
@@ -385,22 +330,21 @@ class ApiController {
                 req.query.all_or_none = req.query.all_or_none == "true";
             }
             if (!body.length) {
-                return self.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
+                return this.sendError(res, SIS.ERR_BAD_REQ("Array must not be empty."));
             }
         }
-        var p = self.getManager(req);
-        var options = self._getReqOptions(req);
+        var options = this._getReqOptions(req);
         if (req.params.isBulk) {
             options.allOrNone = req.query.all_or_none;
-            p = p.then(function(mgr) {
+            await this._finish(req, res, 200, async () => {
+                var mgr = await this.getManager(req);
                 return mgr.bulkAdd(body, options);
             });
-            self._finish(req, res, p, 200);
         } else {
-            p = p.then(function(mgr) {
+            await this._finish(req, res, 201, async () => {
+                var mgr = await this.getManager(req);
                 return mgr.add(body, options);
             });
-            self._finish(req, res, p, 201);
         }
     }
 
@@ -437,233 +381,180 @@ class ApiController {
     }
 
     // "private"
-    // Wrap a controller func with authorization
-    // The returned function is a request handler
-    // bound to the controller.
+    // Wrap a controller func(req, res) as a request handler bound to the
+    // controller that authenticates the request first if auth is enabled.
+    // An error func throws is sent to the client.
     _wrapAuth(func) {
-        return function(req, res) {
-            if (!this.auth) {
-                return func.call(this, req, res);
-            }
-            var p = this.authenticate(req, res, SIS.SCHEMA_TOKENS);
-            var self = this;
-            p.then(function(auth) {
-                func.call(self, req, res);
-            })
-            .catch(function(err) {
-                return self.sendError(res, err);
-            });
-        }.bind(this);
+        return this._handler(func, this.auth);
     }
 
     // Wrap a read (GET) handler.  Reads only require a token when
     // auth_reads is enabled.
     _wrapReadAuth(func) {
-        if (this.authReads) {
-            return this._wrapAuth(func);
-        }
-        return func.bind(this);
+        return this._handler(func, this.auth && this.authReads);
+    }
+
+    _handler(func, authenticate) {
+        return async (req, res) => {
+            try {
+                if (authenticate) {
+                    await this.authenticate(req, res, SIS.SCHEMA_TOKENS);
+                }
+                await func.call(this, req, res);
+            } catch (err) {
+                this.sendError(res, err);
+            }
+        };
     }
 
     // Enable the commit API endpoints
     _enableCommitApi(app, prefix) {
         // all history
-        var self = this;
-        app.get(prefix + "/:id/commits", this._wrapReadAuth(function(req, res) {
+        app.get(prefix + "/:id/commits", this._wrapReadAuth(async function(req, res) {
             req.params.isCommitApi = true;
-            var type = this.getType(req);
-            var id = req.params.id;
             var rq = this._parseValidQuery(req, res);
             if (!rq) {
                 return;
             }
             var mongooseModel = this.commitManager.model;
-
             // update the query for the right types
-            rq.query.entity_id = id;
-            rq.query.type = type;
-
-            Promise.resolve(mongooseModel.countDocuments(rq.query).exec()).then(function(c) {
-                if (!c) {
-                    res.setHeader("x-total-count", 0);
-                    return self.sendObject(res, 200, []);
+            rq.query.entity_id = req.params.id;
+            rq.query.type = this.getType(req);
+            var count = 0;
+            var commits = [];
+            try {
+                count = await mongooseModel.countDocuments(rq.query).exec();
+                if (count) {
+                    var opts = { skip : rq.offset, limit: rq.limit};
+                    commits = await mongooseModel.find(rq.query, rq.fields, opts).sort({date_modified: -1}).exec();
                 }
-                var opts = { skip : rq.offset, limit: rq.limit};
-                var mgQuery = mongooseModel.find(rq.query, rq.fields, opts).sort({date_modified: -1});
-                return Promise.resolve(mgQuery.exec()).then(function(entities) {
-                    res.setHeader("x-total-count", c);
-                    self.sendObject(res, 200, entities);
-                });
-            }).catch(function(err) {
-                res.setHeader("x-total-count", 0);
-                self.sendObject(res, 200, []);
-            });
+            } catch (err) {
+                // e.g. a query that cannot be cast - nothing matches it
+                count = 0;
+                commits = [];
+            }
+            res.setHeader(SIS.HEADER_TOTAL_COUNT, count);
+            await this.sendObject(res, 200, commits);
         }));
 
         // specific entry by history id
-        app.get(prefix + "/:id/commits/:hid", this._wrapReadAuth(function(req, res) {
-            var type = this.getType(req);
-            var id = req.params.id;
+        app.get(prefix + "/:id/commits/:hid", this._wrapReadAuth(async function(req, res) {
             var hid = req.params.hid;
             req.params.isCommitApi = true;
-            this.commitManager.getVersionById(type, id, hid).then(function(result) {
-                if (!result) {
-                    return self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
-                }
-                result.value_at = self.convertToResponseObject(req, result.value_at);
-                self.sendObject(res, 200, result);
-            }, function(err) {
-                self.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
-            });
+            var result = null;
+            try {
+                result = await this.commitManager.getVersionById(this.getType(req), req.params.id, hid);
+            } catch (err) {
+                result = null;
+            }
+            if (!result) {
+                return this.sendError(res, SIS.ERR_NOT_FOUND("commit", hid));
+            }
+            result.value_at = this.convertToResponseObject(req, result.value_at);
+            await this.sendObject(res, 200, result);
         }));
 
-        app.get(prefix + "/:id/revision/:utc", this._wrapReadAuth(function(req, res) {
-            var type = this.getType(req);
-            var id = req.params.id;
+        app.get(prefix + "/:id/revision/:utc", this._wrapReadAuth(async function(req, res) {
             var utc = req.params.utc;
             req.params.isCommitApi = true;
-            this.commitManager.getVersionByUtc(type, id, utc).then(function(result) {
-                if (!result) {
-                    return self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
-                }
-                self.sendObject(res, 200, self.convertToResponseObject(req, result));
-            }, function(err) {
-                self.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
-            });
-
+            var result = null;
+            try {
+                result = await this.commitManager.getVersionByUtc(this.getType(req), req.params.id, utc);
+            } catch (err) {
+                result = null;
+            }
+            if (!result) {
+                return this.sendError(res, SIS.ERR_NOT_FOUND("commit at time", utc));
+            }
+            await this.sendObject(res, 200, this.convertToResponseObject(req, result));
         }));
     }
 
     _convertToResponseObject(req, obj) {
-        var self = this;
         if (req.params.isBulk) {
             // change the success array
-            obj.success = obj.success.map(function(o) {
+            obj.success = obj.success.map((o) => {
                 if (req.method == SIS.METHOD_PUT) {
                     // get the update value
                     o = o.updated;
                 }
-                o = self.convertToResponseObject(req, o);
-                return o;
+                return this.convertToResponseObject(req, o);
             });
             return obj;
         }
         if (obj instanceof Array) {
-            obj = obj.map(function(o) {
-                o = self.convertToResponseObject(req, o);
-                return o;
-            });
-        } else {
-            obj = self.convertToResponseObject(req, obj);
+            return obj.map((o) => this.convertToResponseObject(req, o));
         }
-        return obj;
+        return this.convertToResponseObject(req, obj);
     }
 
-    // Get the callback that will send the result from the controller
-    _getSendCallback(req, res, code) {
-        var self = this;
-        return function(err, result) {
-            if (err) { return self.sendError(res, err); }
-            // hooks get the object - and the old one for an update
-            var toSend = result;
-            var hookEvt = SIS.METHODS_TO_EVENT[req.method];
-            if (!req.params.isBulk &&
-                req.method == SIS.METHOD_PUT && req.params.id) {
-                if (!result.old) {
-                    // an upsert that added the object - it was created
-                    code = 201;
-                    hookEvt = SIS.EVENT_INSERT;
-                    toSend = result.updated;
-                }
-                result = result.updated;
+    // Send the result of the request and dispatch the hooks for it
+    async _send(req, res, code, result) {
+        // hooks get the object - and the old one for an update
+        var toSend = result;
+        var hookEvt = SIS.METHODS_TO_EVENT[req.method];
+        if (!req.params.isBulk &&
+            req.method == SIS.METHOD_PUT && req.params.id) {
+            if (!result.old) {
+                // an upsert that added the object - it was created
+                code = 201;
+                hookEvt = SIS.EVENT_INSERT;
+                toSend = result.updated;
             }
-            result = self._convertToResponseObject(req, result);
-            self.sendObject(res, code, result, req.params.isBulk);
-            // dispatch hooks
-            var hookType = self.getType(req);
-            if (self.hm && req.method in SIS.METHODS_TO_EVENT) {
-                if (req.params.isBulk) {
-                    // the objects as sent in the response
-                    toSend = result.success;
-                }
-                self.hm.dispatchHooks(toSend, hookType, hookEvt, req.params.isBulk);
-            }
-        };
-    }
-
-    _saveSingleCommit(req, result) {
-        var old = null;
-        var now = null;
-        switch (req.method) {
-            case SIS.METHOD_PUT:
-                // an update - old is null if an upsert added the object
-                old = result.old;
-                now = result.updated;
-                break;
-            case SIS.METHOD_POST:
-                // add
-                now = result;
-                break;
-            case SIS.METHOD_DELETE:
-                old = result;
-                break;
-            default:
-                return Promise.reject(SIS.ERR_INTERNAL("invalid commit being saved"));
+            result = result.updated;
         }
-        // a commit that fails to save doesn't fail the request (for now)
-        var done = function() { return result; };
-        return this.commitManager.recordHistory(old, now, req.user, this.getType(req)).then(done, done);
+        result = this._convertToResponseObject(req, result);
+        var sent = this.sendObject(res, code, result, req.params.isBulk);
+        // dispatch hooks
+        if (this.hm && req.method in SIS.METHODS_TO_EVENT) {
+            if (req.params.isBulk) {
+                // the objects as sent in the response
+                toSend = result.success;
+            }
+            this.hm.dispatchHooks(toSend, this.getType(req), hookEvt, req.params.isBulk);
+        }
+        await sent;
     }
 
-    _saveBulkCommits(req, items) {
-        // save it
+    // Save the commit of the result.  A commit that fails to save doesn't
+    // fail the request (for now) - it is logged.
+    async _saveCommit(req, result) {
+        if (!this.shouldSaveCommit(req)) {
+            return;
+        }
         var action = SIS.METHODS_TO_EVENT[req.method];
         var type = this.getType(req);
-        return this.commitManager.recordHistoryBulk(items, req.user, action, type)
-        .then(function() {
-            return items;
-        });
-    }
-
-    // Save a commit to the commit log
-    _saveCommit(req) {
-        // need to return a promise that saves history
-        // but returns the initial object passed to it
-        return function(result) {
-            if (!this.shouldSaveCommit(req)) {
-                return Promise.resolve(result);
-            }
-
+        try {
             if (req.params.isBulk) {
-                var items = result.success;
-                if (items.length) {
-                    return this._saveBulkCommits(req, items)
-                    .then(function() {
-                        return result;
-                    }).catch(function() {
-                        return result;
-                    });
-                } else {
-                    return Promise.resolve(result);
+                if (result.success.length) {
+                    await this.commitManager.recordHistoryBulk(result.success, req.user, action, type);
                 }
             } else {
-                return this._saveSingleCommit(req, result);
+                // an update's old is null if an upsert added the object
+                var old = req.method == SIS.METHOD_PUT ? result.old :
+                          req.method == SIS.METHOD_DELETE ? result : null;
+                var now = req.method == SIS.METHOD_PUT ? result.updated :
+                          req.method == SIS.METHOD_POST ? result : null;
+                await this.commitManager.recordHistory(old, now, req.user, type);
             }
-        }.bind(this);
+        } catch (err) {
+            if (req.log) {
+                req.log.error({ err : err }, "Error saving the commit");
+            }
+        }
     }
 
-    // Do the final steps of the request
-    // p is the promise that receives the object from the
-    // request handler
-    _finish(req, res, p, code) {
-        p = p.then(P.tap(this._saveCommit(req)));
-        var cb = this._getSendCallback(req, res, code);
-        p.then(function(result) {
-            cb(null, result);
-        })
-        .catch(function(err) {
-            cb(err);
-        });
+    // Do the final steps of the request: resolve the result with work,
+    // save its commit, send it and dispatch its hooks.  An error is sent
+    // to the client.
+    async _finish(req, res, code, work) {
+        try {
+            var result = await work();
+            await this._saveCommit(req, result);
+            await this._send(req, res, code, result);
+        } catch (err) {
+            this.sendError(res, err);
+        }
     }
 
     // get request options to pass to managers per request
