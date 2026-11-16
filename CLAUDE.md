@@ -141,11 +141,12 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   `util/`, the controllers in `routes/` and the endpoint code in `endpoints/` are
   converted: they are ES classes (`class X extends Manager`, with `super(...)` and
   `super.method(...)`) and use `async` methods, `try`/`catch` around awaited calls and
-  arrow callbacks instead of `var self = this`, and take no callbacks. The manager specs
-  are `async` too; many API specs still use `done` callbacks. Write new code the
-  converted way and cover it in the style of `test/test-manager.js` (`async` mocha
-  tests, `await` on supertest requests and the `TestUtil` fixtures, and
-  `TestUtil.expectError` for SIS error tuples).
+  arrow callbacks instead of `var self = this`, and take no callbacks. The specs are
+  `async` too. Write new code the converted way and cover it in the style of
+  `test/test-manager.js` (`async` mocha tests, `await` on supertest requests and the
+  `TestUtil` fixtures, and `TestUtil.expectError` for SIS error tuples). Assert in the
+  test, not in a callback: a throw inside an express handler or a promise callback
+  becomes a timeout instead of the failure.
 - Controller handlers are `async (req, res)` methods wrapped by `_wrapAuth` /
   `_wrapReadAuth`, which authenticate and send whatever the handler throws. A handler
   hands `_finish(req, res, code, async () => result)` the work that resolves its result;
