@@ -410,7 +410,7 @@ describe("Hook Dispatch", function() {
             common(p.post, SIS.EVENT_UPDATE, false);
             p.post.data.should.eql(p.res);
             p.post.old_value.should.eql(old);
-            // a GET hook gets the manager's [old, updated, null] result as JSON
+            // a GET hook gets [old, updated, null] as JSON - what update used to resolve with
             var pair = JSON.parse(p.get.data);
             pair.length.should.eql(3);
             pair[0].num.should.eql(1);

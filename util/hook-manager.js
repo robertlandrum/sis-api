@@ -97,6 +97,7 @@ var sendRequest = async function(options, retryCount, delay) {
 };
 
 // Send the event to the hook.  Resolves with the response body.
+// entity is the object - or for an update that is not bulk, { old, updated }
 var dispatchHook = function(hook, entity, event, isBulk) {
     // This check will never be true
     if (typeof entity.toObject === 'function') {
@@ -110,17 +111,21 @@ var dispatchHook = function(hook, entity, event, isBulk) {
         'data' : entity,
         'is_bulk' : isBulk || false
     };
+    // what a GET hook gets as data, as JSON
+    var serialized = entity;
     if (event == SIS.EVENT_UPDATE && !isBulk) {
-        // array of two
-        data.data = entity[1];
-        data.old_value = entity[0];
+        data.data = entity.updated;
+        data.old_value = entity.old;
+        // GET hooks have always been sent the [old, updated, null] array
+        // update used to resolve with
+        serialized = [entity.old, entity.updated, null];
     }
     var options = {
         "url" : hook.target.url,
         "method" : hook.target.action
     };
     if (options.method == 'GET') {
-        data.data = JSON.stringify(entity);
+        data.data = JSON.stringify(serialized);
         // serialize with qs so the nested object round-trips through the
         // receiver's query parser (which also uses qs), e.g. data[entity_type]=...
         var query = qs.stringify({ 'data' : data });
@@ -170,9 +175,8 @@ HookManager.prototype.triggerHooks = async function(entityType, entityId, opts) 
     var mgr = await this.sm.getEntityManager(entityType);
     opts.lean = mgr.model.schema._sis_defaultpaths.length === 0;
     var entity = await mgr.getById(entityId);
-    // trigger an update - which is an array of length 2
-    // for old and new
-    this.dispatchHooks([entity, entity], entityType, SIS.EVENT_UPDATE, false);
+    // trigger an update from the entity to itself
+    this.dispatchHooks({ old : entity, updated : entity }, entityType, SIS.EVENT_UPDATE, false);
     return {
         message: "Hooks triggered successfully",
         type: entityType,

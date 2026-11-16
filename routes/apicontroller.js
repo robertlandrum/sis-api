@@ -525,7 +525,7 @@ ApiController.prototype._convertToResponseObject = function(req, obj) {
         obj.success = obj.success.map(function(o) {
             if (req.method == SIS.METHOD_PUT) {
                 // get the update value
-                o = o[1];
+                o = o.updated;
             }
             o = self.convertToResponseObject(req, o);
             return o;
@@ -548,27 +548,27 @@ ApiController.prototype._getSendCallback = function(req, res, code) {
     var self = this;
     return function(err, result) {
         if (err) { return self.sendError(res, err); }
-        var orig = result;
+        // hooks get the object - and the old one for an update
+        var toSend = result;
         var hookEvt = SIS.METHODS_TO_EVENT[req.method];
         if (!req.params.isBulk &&
             req.method == SIS.METHOD_PUT && req.params.id) {
-            // update.. grab the second obj
-            if (result instanceof Array) {
-                result = result[1];
-            } else if (self.parseUpsert(req)) {
+            if (!result.old) {
                 // an upsert that added the object - it was created
                 code = 201;
                 hookEvt = SIS.EVENT_INSERT;
+                toSend = result.updated;
             }
+            result = result.updated;
         }
         result = self._convertToResponseObject(req, result);
         self.sendObject(res, code, result, req.params.isBulk);
         // dispatch hooks
         var hookType = self.getType(req);
         if (self.hm && req.method in SIS.METHODS_TO_EVENT) {
-            var toSend = orig;
             if (req.params.isBulk) {
-                toSend = orig.success;
+                // the objects as sent in the response
+                toSend = result.success;
             }
             self.hm.dispatchHooks(toSend, hookType, hookEvt, req.params.isBulk);
         }
@@ -580,15 +580,9 @@ ApiController.prototype._saveSingleCommit = function(req, result) {
     var now = null;
     switch (req.method) {
         case SIS.METHOD_PUT:
-            // might be an upsert
-            if (!(result instanceof Array) &&
-                req.query.upsert) {
-                now = result;
-                break;
-            }
-            // update.. result is an array
-            old = result[0];
-            now = result[1];
+            // an update - old is null if an upsert added the object
+            old = result.old;
+            now = result.updated;
             break;
         case SIS.METHOD_POST:
             // add

@@ -190,18 +190,18 @@ describe('EntityManager', function() {
         it("merges mixed and nested objects", async function() {
             var result = await mgr.update("mix", { mixed : { b : { d : 3 }, e : null }, nested : { a : "a1" } },
                                           { user : superUser });
-            result[1].mixed.should.eql({ a : 1, b : { c : 2, d : 3 } });
-            result[1].nested.toObject().should.eql({ a : "a1", b : "b0" });
+            result.updated.mixed.should.eql({ a : 1, b : { c : 2, d : 3 } });
+            result.updated.nested.toObject().should.eql({ a : "a1", b : "b0" });
         });
 
         it("replaces mixed objects when forced", async function() {
             var result = await mgr.update("mix", { mixed : { z : 1 } }, { user : superUser, forceMixed : true });
-            result[1].mixed.should.eql({ z : 1 });
+            result.updated.mixed.should.eql({ z : 1 });
         });
 
         it("leaves mixed objects the update does not set", async function() {
             var result = await mgr.update("mix", { num : 4 }, { user : superUser });
-            result[1].mixed.should.eql({ a : 1, b : { c : 2 } });
+            result.updated.mixed.should.eql({ a : 1, b : { c : 2 } });
         });
     });
 

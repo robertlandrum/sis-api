@@ -284,7 +284,7 @@ describe('HookManager', function() {
             hookManager.update(hookName, updatedHook).nodeify(function(err, updated) {
                 should.not.exist(err);
                 should.exist(updated);
-                updated = updated[1];
+                updated = updated.updated;
                 updated.should.have.property('entity_type','EntityA');
                 updated.toObject().target.should.eql(updatedHook.target);
                 JSON.stringify(updated.events).should.eql(JSON.stringify(updatedHook.events));

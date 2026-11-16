@@ -304,7 +304,7 @@ describe('SchemaManager', function() {
             schema.definition.newBool = "Boolean";
             schemaManager.update(schema.name, schema).nodeify(function(err, updated) {
                 should.not.exist(err);
-                updated = updated[1];
+                updated = updated.updated;
                 should.exist(updated.definition);
                 should.exist(updated.definition.newBool);
                 should.not.exist(updated.definition.num);
@@ -463,7 +463,7 @@ describe('SchemaManager', function() {
             this.timeout(600000);
             delete schema.definition.str.unique;
             schemaManager.update(schema.name, schema).then(function(result) {
-                schemaDoc = result[1].toObject();
+                schemaDoc = result.updated.toObject();
                 var EntityType = schemaManager.getEntityModel(schemaDoc);
                 var doc2 = new EntityType({ str : "foo", other : "bar" });
                 doc2.save().then(function() {
@@ -477,7 +477,7 @@ describe('SchemaManager', function() {
             var EntityType = schemaManager.getEntityModel(schemaDoc);
             var indeces = EntityType.schema.indexes();
             schemaManager.update(schema.name, schema).then(function(result) {
-                schemaDoc = result[1].toObject();
+                schemaDoc = result.updated.toObject();
                 EntityType = schemaManager.getEntityModel(schemaDoc);
                 indeces = EntityType.schema.indexes();
                 indeces = indeces.filter(function(ind) {
