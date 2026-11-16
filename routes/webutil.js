@@ -232,6 +232,24 @@ module.exports.authenticate = function(req, res, type) {
     });
 };
 
+// The SIS error to send for an error passed to express's error handler:
+// a SIS error as it is, an error of the body parser (such as a body that is
+// not JSON or is too large) as a bad request with its 4xx status, and
+// anything else as an internal error
+module.exports.toSisError = function(err) {
+    if (err instanceof Array && err.length >= 2) {
+        return err;
+    }
+    if (err && err.expose && err.status >= 400 && err.status < 500) {
+        if (err.type === "entity.parse.failed") {
+            return SIS.ERR_BAD_REQ("Invalid JSON");
+        }
+        var badReq = SIS.ERR_BAD_REQ(err.message);
+        return [err.status, badReq[1]];
+    }
+    return SIS.ERR_INTERNAL("Unexpected error : " + err);
+};
+
 // Express middleware that rejects requests without a valid API token
 module.exports.requireToken = function(req, res, next) {
     module.exports.authenticate(req, res, SIS.SCHEMA_TOKENS).then(function() {

@@ -146,7 +146,7 @@ var startServer = function(callback) {
             // setup error handler
             app.use(logger.errorLoggingMiddleware());
             app.use(function(err, req, res, next) {
-                var errObj = SIS.ERR_INTERNAL("Unexpected error : " + err);
+                var errObj = webUtil.toSisError(err);
                 res.status(errObj[0]).send(errObj[1]);
             });
 

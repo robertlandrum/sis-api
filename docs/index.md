@@ -86,6 +86,8 @@ Additionally, the HTTP status is set appropriately.  The following statuses are 
 * 401 - unauthorized
 * 404 - resource not found
 * 409 - conflict: a unique value is already taken, e.g. a schema or hook name, or an entity field marked `unique` (code 1005, with a message such as `Conflict: hostname "web1" already exists`)
+* 413 - the request body is larger than 10 MB
+* 415 - the request body uses a charset SIS cannot read
 * 500 - internal error
 
 ## SIS Resources
