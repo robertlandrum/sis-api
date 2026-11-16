@@ -8,60 +8,54 @@ describe('SchemaManager', function() {
 
     var schemaManager = null;
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            schemaManager = require("../util/schema-manager")(mongoose, { auth : false});
-            done(err);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        schemaManager = require("../util/schema-manager")(mongoose, { auth : false});
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
+
+    var expectError = TestUtil.expectError;
+
+    // delete the schema if it is there
+    async function deleteSchema(name) {
+        try {
+            await schemaManager.delete(name);
+        } catch (err) {
+            // it was not
+        }
+    }
 
     describe('add-invalid-schema', function() {
-        it("should error adding an empty string ", function(done) {
-            var name = "name";
-            var schema = "";
-            schemaManager.add({"name" : name, "definition" : schema}).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+        it("should error adding an empty string ", async function() {
+            await expectError(schemaManager.add({ "name" : "name", "definition" : "" }), 400,
+                              /definition must be an object/);
         });
 
-        it("should error adding an empty object ", function(done) {
-            var name = "name";
-            var schema = { };
-            schemaManager.add({"name" : name, "definition" : schema}).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+        it("should error adding an empty object ", async function() {
+            await expectError(schemaManager.add({ "name" : "name", "definition" : { } }), 400,
+                              /Cannot add an empty schema/);
         });
 
 
-        it("should error adding a schema with an unkown type ", function(done) {
-            var name = "name";
+        it("should error adding a schema with an unkown type ", async function() {
             var schema = { "field1" : "Bogus", "field2" : "String" };
-            schemaManager.add({"name" : name, "definition" : schema}).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(schemaManager.add({ "name" : "name", "definition" : schema }), 400,
+                              /Schema is invalid: .*Bogus/);
         });
 
 
-        it("should error adding a schema with no name ", function(done) {
-            var name = "";
+        it("should error adding a schema with no name ", async function() {
             var schema = { "field1" : "String", "field2" : "String" };
-            schemaManager.add({"name" : name, "definition" : schema}).nodeify(function(err, entity) {
-                should.exist(err);
-                done();
-            });
+            await expectError(schemaManager.add({ "name" : "", "definition" : schema }), 400,
+                              /invalid name/);
         });
     });
 
     describe('add-schema', function() {
-        it("should add a valid json schema object", function(done) {
-            var name = "network_element";
+        it("should add a valid json schema object", async function() {
             var schema = {
                 "name" : "network_element",
                 _sis : { "owner" : ["test"] },
@@ -74,18 +68,14 @@ describe('SchemaManager', function() {
                     bgpip6: "String"
                 }
             };
-            schemaManager.add(schema).nodeify(function(err, entity) {
-                should.not.exist(err);
-
-                entity.should.have.property('name', 'network_element');
-                entity.should.have.property('definition');
-                entity.definition.should.eql(schema.definition);
-                done();
-            });
+            var entity = await schemaManager.add(schema);
+            entity.should.have.property('name', 'network_element');
+            entity.should.have.property('definition');
+            entity.definition.should.eql(schema.definition);
         });
 
         ['sis_hiera', 'sis_schemas', 'sis_hooks'].map(function(name) {
-            it("should fail to add a schema with name" + name, function(done) {
+            it("should fail to add a schema with name" + name, async function() {
                 var schema = {
                     "name" : name,
                     _sis : { "owner" : ["test"] },
@@ -93,28 +83,20 @@ describe('SchemaManager', function() {
                         ne_type: "String"
                     }
                 };
-                schemaManager.add(schema).nodeify(function(err, entity) {
-                    should.exist(err);
-                    should.not.exist(entity);
-                    done();
-                });
+                await expectError(schemaManager.add(schema), 400, /Schema name is reserved/);
             });
         });
-        it("Should fail to add an empty schema", function(done) {
+        it("Should fail to add an empty schema", async function() {
             var schema = {
                 "name" : "name",
                 _sis : { "owner" : "test" },
                 "definition" : { }
             };
-            schemaManager.add(schema).nodeify(function(err, entity) {
-                should.exist(err);
-                should.not.exist(entity);
-                done();
-            });
+            await expectError(schemaManager.add(schema), 400, /Cannot add an empty schema/);
         });
 
         ['_id', '__v'].map(function(field) {
-            it("Should fail to add a schema w/ field " + field, function(done) {
+            it("Should fail to add a schema w/ field " + field, async function() {
                 var schema = {
                     "name" : "schema1",
                     _sis : { "owner" : ["test"] },
@@ -123,26 +105,18 @@ describe('SchemaManager', function() {
                     }
                 };
                 schema.definition[field] = 'String';
-                schemaManager.add(schema).nodeify(function(err, entity) {
-                    should.exist(err);
-                    should.not.exist(entity);
-                    done();
-                });
+                await expectError(schemaManager.add(schema), 400, new RegExp(field + " is a reserved field"));
             });
         });
-        it("Should fail to add a schema with a bad definition", function(done) {
+        it("Should fail to add a schema with a bad definition", async function() {
             var schema = {
                 "name" : "schema1",
                 _sis : { "owner" : ["test"] },
                 "definition" : "Bogus"
             };
-            schemaManager.add(schema).nodeify(function(err, entity) {
-                should.exist(err);
-                should.not.exist(entity);
-                done();
-            });
+            await expectError(schemaManager.add(schema), 400, /definition must be an object/);
         });
-        it("Should fail to add a schema with an invalid schema def", function(done) {
+        it("Should fail to add a schema with an invalid schema def", async function() {
             var schema = {
                 "name" : "schema1",
                 _sis : { "owner" : ["test"] },
@@ -150,21 +124,16 @@ describe('SchemaManager', function() {
                     "name" : "UnknownType"
                 }
             };
-            schemaManager.add(schema).nodeify(function(err, entity) {
-                should.exist(err);
-                should.not.exist(entity);
-                done();
-            });
+            await expectError(schemaManager.add(schema), 400, /Schema is invalid: .*UnknownType/);
         });
     });
 
     describe("getEntityModel failures", function() {
-        it("Should fail to get an EntityModel for a schema with no name", function(done) {
+        it("Should fail to get an EntityModel for a schema with no name", function() {
             var model = schemaManager.getEntityModel({'definition' : {'name' : 'String'}});
             should.not.exist(model);
-            done();
         });
-        it("Should fail to get an EntityModel for an invalid schema def", function(done) {
+        it("Should fail to get an EntityModel for an invalid schema def", function() {
             var schema = {
                 name : 'invalid',
                 _sis : { owner : ['invalid'] },
@@ -172,7 +141,6 @@ describe('SchemaManager', function() {
             };
             var model = schemaManager.getEntityModel(schema);
             should.not.exist(model);
-            done();
         });
     });
 
@@ -189,70 +157,32 @@ describe('SchemaManager', function() {
             _sis : { "owner" : ["test"] },
             "definition" : schemaDef
         };
-        before(function(done) {
-            schemaManager.add(fullSchema).nodeify(function(err, entity) {
-                if (err) {
-                    done(err);
-                    return;
-                }
-                // add some documents - get the model and save a document
-                var EntityType = schemaManager.getEntityModel(entity);
-                if (!EntityType) {
-                    done("Entity type is null");
-                    return;
-                }
-                var doc = new EntityType({f1 : "f1", f2 : "f2" } );
-                doc.save().then(function(e) {
-                    // assert there is an item
-                    EntityType.countDocuments({}).exec().then(function(result) {
-                        result.should.eql(1);
-                        done();
-                    }, done);
-                }, done);
-            });
+        before(async function() {
+            var entity = await schemaManager.add(fullSchema);
+            // add some documents - get the model and save a document
+            var EntityType = schemaManager.getEntityModel(entity);
+            should.exist(EntityType);
+            await new EntityType({f1 : "f1", f2 : "f2" } ).save();
+            // assert there is an item
+            (await EntityType.countDocuments({}).exec()).should.eql(1);
         });
 
-        it("Should return false if schema dne ", function(done) {
-            schemaManager.delete("DNE").nodeify(function(err, result) {
-                should.exist(err);
-                should.not.exist(result);
-                done();
-            });
+        it("Should fail to delete a schema that does not exist", async function() {
+            await expectError(schemaManager.delete("DNE"), 404);
         });
 
-        it("Should return true if schema exists ", function(done) {
-            schemaManager.delete(schemaName).nodeify(function(err, result) {
-                should.not.exist(err);
-                /* jshint expr: true */
-                result.should.be.ok;
-                done(err);
-            });
+        it("Should delete the schema", async function() {
+            (await schemaManager.delete(schemaName)).name.should.eql(schemaName);
         });
 
-        it("Should no longer exist ", function(done) {
-            // ensure it is null
-            schemaManager.getById(schemaName)
-                .done(function(result) {
-                    done(result);
-                }, function(err) {
-                    // expect it to not exist
-                    done();
-                });
+        it("Should no longer exist ", async function() {
+            await expectError(schemaManager.getById(schemaName), 404);
         });
 
-        it("Should have no documents ", function(done) {
-            schemaManager.add(fullSchema).nodeify(function(err, entity) {
-                if (err) {
-                    console.log(err);
-                    done(err);
-                    return;
-                }
-                var EntityType = schemaManager.getEntityModel(entity);
-                EntityType.countDocuments({}).exec().then(function(result) {
-                    result.should.eql(0);
-                    done();
-                }, done);
-            });
+        it("Should have no documents ", async function() {
+            var entity = await schemaManager.add(fullSchema);
+            var EntityType = schemaManager.getEntityModel(entity);
+            (await EntityType.countDocuments({}).exec()).should.eql(0);
         });
     });
 
@@ -280,79 +210,58 @@ describe('SchemaManager', function() {
         var savedEntity = null;
 
         // create the schema and add an entity
-        before(function(done) {
-            schemaManager.delete(schema.name).nodeify(function() {
-                schemaManager.add(schema).nodeify(function(err, result) {
-                    if (err) return done(err);
-                    var EntityType = schemaManager.getEntityModel(schema);
-                    var doc = new EntityType(initialEntity);
-                    doc.save().then(function(e) {
-                        savedEntity = e;
-                        done();
-                    }, function(err) { return done(err); });
-                });
-            });
+        before(async function() {
+            await deleteSchema(schema.name);
+            await schemaManager.add(schema);
+            var EntityType = schemaManager.getEntityModel(schema);
+            savedEntity = await new EntityType(initialEntity).save();
         });
-        after(function(done) {
-            schemaManager.delete(schema.name).nodeify(done);
+        after(async function() {
+            await schemaManager.delete(schema.name);
         });
 
-        it("Should update the schema", function(done) {
+        it("Should update the schema", async function() {
             // delete the num field, change bool to string, add field
             delete schema.definition.num;
             schema.definition.bool = 'String';
             schema.definition.newBool = "Boolean";
-            schemaManager.update(schema.name, schema).nodeify(function(err, updated) {
-                should.not.exist(err);
-                updated = updated.updated;
-                should.exist(updated.definition);
-                should.exist(updated.definition.newBool);
-                should.not.exist(updated.definition.num);
-                schemaManager.getById(schema.name).done(function(o) {
-                    updated.toObject().should.eql(o.toObject());
-                    done();
-                }, function(e) { done(e); });
-            });
+            var updated = (await schemaManager.update(schema.name, schema)).updated;
+            should.exist(updated.definition);
+            should.exist(updated.definition.newBool);
+            should.not.exist(updated.definition.num);
+            var o = await schemaManager.getById(schema.name);
+            updated.toObject().should.eql(o.toObject());
         });
 
-        it("Should retrieve the existing entity", function(done) {
-            schemaManager.getById(schema.name).done(function(entitySchema) {
-                var EntityType = schemaManager.getEntityModel(entitySchema);
-                EntityType.findOne({"_id" : savedEntity._id}).exec().then(function(result) {
-                    should.exist(result);
-                    // ensure that the bool is removed
-                    should.not.exist(result.num);
-                    done();
-                }, done);
-            }, done);
+        it("Should retrieve the existing entity", async function() {
+            var entitySchema = await schemaManager.getById(schema.name);
+            var EntityType = schemaManager.getEntityModel(entitySchema);
+            var result = await EntityType.findOne({"_id" : savedEntity._id}).exec();
+            should.exist(result);
+            // ensure that the num is removed
+            should.not.exist(result.num);
         });
 
-        it("Should not save the initial entity num field " + JSON.stringify(initialEntity), function(done) {
-            schemaManager.getById(schema.name).done(function(entitySchema) {
-                var EntityType = schemaManager.getEntityModel(entitySchema);
-                var doc = new EntityType(initialEntity);
-                var docSchema = doc.schema;
-                should.not.exist(doc.schema.num);
-                doc.save().then(function(e) {
-                    should.exist(e.str);
-                    should.not.exist(e.num);
-                    done();
-                }, done);
-            }, done);
+        it("Should not save the initial entity num field " + JSON.stringify(initialEntity), async function() {
+            var entitySchema = await schemaManager.getById(schema.name);
+            var EntityType = schemaManager.getEntityModel(entitySchema);
+            var doc = new EntityType(initialEntity);
+            should.not.exist(doc.schema.num);
+            var e = await doc.save();
+            should.exist(e.str);
+            should.not.exist(e.num);
         });
 
-        it("Should save an updated entity", function(done) {
-            schemaManager.getById(schema.name).done(function(entitySchema) {
-                var EntityType = schemaManager.getEntityModel(entitySchema);
-                var doc = new EntityType({
-                    "str" : "new",
-                    "newBool" : true,
-                    "date" : new Date(),
-                    "arr" : [0,1,2],
-                    "bool" : "became a string"
-                });
-                doc.save().then(function() { done(); }, done);
-            }, done);
+        it("Should save an updated entity", async function() {
+            var entitySchema = await schemaManager.getById(schema.name);
+            var EntityType = schemaManager.getEntityModel(entitySchema);
+            await new EntityType({
+                "str" : "new",
+                "newBool" : true,
+                "date" : new Date(),
+                "arr" : [0,1,2],
+                "bool" : "became a string"
+            }).save();
         });
     });
 
@@ -367,7 +276,7 @@ describe('SchemaManager', function() {
             }
         };
 
-        beforeEach(function(done){
+        beforeEach(function() {
             s.definition = {
                 "str":   "String",
                 "num":   "Number",
@@ -375,30 +284,27 @@ describe('SchemaManager', function() {
                 "bool":  "Boolean",
                 "arr": []
             };
-            done();
         });
 
-        it("should match the schemas", function(done) {
+        it("should match the schemas", function() {
             var s1 = schemaManager._getMongooseSchema(s);
             var s2 = schemaManager._getMongooseSchema(s);
             var diff = schemaManager._diffSchemas(s1, s2);
             for (var i = 0; i < diff.length; ++i) {
                 diff[i].length.should.eql(0);
             }
-            done();
         });
 
-        it("should see str was removed", function(done) {
+        it("should see str was removed", function() {
             var s1 = schemaManager._getMongooseSchema(s);
             delete s.definition.str;
             var s2 = schemaManager._getMongooseSchema(s);
             var diff = schemaManager._diffSchemas(s1, s2);
             diff[1].length.should.eql(1);
             diff[1][0][0].should.eql('str');
-            done();
         });
 
-        it("should see str was removed, q added, num updated", function(done) {
+        it("should see str was removed, q added, num updated", function() {
             var s1 = schemaManager._getMongooseSchema(s);
             delete s.definition.str;
             s.definition.q = "String";
@@ -411,7 +317,6 @@ describe('SchemaManager', function() {
             diff[0][0][0].should.eql('q');
             diff[2].length.should.eql(1);
             diff[2][0][0].should.eql('num');
-            done();
         });
     });
 
@@ -428,71 +333,51 @@ describe('SchemaManager', function() {
         var schemaDoc = null;
 
         // create the schema
-        before(function(done) {
-            schemaManager.delete(schema.name).nodeify(function() {
-                schemaManager.add(schema).nodeify(function(err, result) {
-                    if (err) return done(err);
-                    schemaDoc = result.toObject();
-                    done();
-                });
-            });
-
+        before(async function() {
+            await deleteSchema(schema.name);
+            schemaDoc = (await schemaManager.add(schema)).toObject();
         });
         //
-        after(function(done) {
-            schemaManager.delete(schema.name).nodeify(done);
+        after(async function() {
+            await schemaManager.delete(schema.name);
         });
 
-        it("Should fail to add two objects w/ same str", function(done) {
+        it("Should fail to add two objects w/ same str", async function() {
             var EntityType = schemaManager.getEntityModel(schemaDoc);
-            EntityType.ensureIndexes().then(function() {
-                var doc1 = new EntityType({ str : "foo", other : "foo" });
-                var doc2 = new EntityType({ str : "foo", other : "bar" });
-                doc1.save().then(function() {
-                    doc2.save().then(function() {
-                        done(new Error("doc2.save should have failed with a duplicate key error"));
-                    }, function(err) {
-                        should.exist(err);
-                        done();
-                    });
-                }, done);
-            }, done);
+            await EntityType.ensureIndexes();
+            await new EntityType({ str : "foo", other : "foo" }).save();
+            var err = null;
+            try {
+                await new EntityType({ str : "foo", other : "bar" }).save();
+            } catch (e) {
+                err = e;
+            }
+            should.exist(err, "the second save should have failed with a duplicate key error");
+            err.code.should.eql(11000);
         });
 
-        it("Should remove the unique index", function(done) {
+        it("Should remove the unique index", async function() {
             this.timeout(600000);
             delete schema.definition.str.unique;
-            schemaManager.update(schema.name, schema).then(function(result) {
-                schemaDoc = result.updated.toObject();
-                var EntityType = schemaManager.getEntityModel(schemaDoc);
-                var doc2 = new EntityType({ str : "foo", other : "bar" });
-                doc2.save().then(function() {
-                    done();
-                }, done);
-            }).catch(done);
+            schemaDoc = (await schemaManager.update(schema.name, schema)).updated.toObject();
+            var EntityType = schemaManager.getEntityModel(schemaDoc);
+            await new EntityType({ str : "foo", other : "bar" }).save();
         });
 
-        it("Should remove the 'other' index", function(done) {
+        it("Should remove the 'other' index", async function() {
             delete schema.definition.other;
+            schemaDoc = (await schemaManager.update(schema.name, schema)).updated.toObject();
             var EntityType = schemaManager.getEntityModel(schemaDoc);
-            var indeces = EntityType.schema.indexes();
-            schemaManager.update(schema.name, schema).then(function(result) {
-                schemaDoc = result.updated.toObject();
-                EntityType = schemaManager.getEntityModel(schemaDoc);
-                indeces = EntityType.schema.indexes();
-                indeces = indeces.filter(function(ind) {
-                    var keys = Object.keys(ind[0]);
-                    return keys.length != 1 || keys[0].indexOf('_sis') !== 0;
-                });
-                indeces.length.should.eql(0);
-                done();
-            }).catch(done);
+            var indeces = EntityType.schema.indexes().filter(function(ind) {
+                var keys = Object.keys(ind[0]);
+                return keys.length != 1 || keys[0].indexOf('_sis') !== 0;
+            });
+            indeces.length.should.eql(0);
         });
 
     });
 
     describe("edge cases", function() {
-        var expectError = TestUtil.expectError;
         var superUser = { name : "sm_super", super_user : true };
 
         function schemaWith(fields) {
