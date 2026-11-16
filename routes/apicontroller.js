@@ -549,21 +549,22 @@ ApiController.prototype._getSendCallback = function(req, res, code) {
     return function(err, result) {
         if (err) { return self.sendError(res, err); }
         var orig = result;
+        var hookEvt = SIS.METHODS_TO_EVENT[req.method];
         if (!req.params.isBulk &&
             req.method == SIS.METHOD_PUT && req.params.id) {
             // update.. grab the second obj
             if (result instanceof Array) {
                 result = result[1];
             } else if (self.parseUpsert(req)) {
-                // code becomes 201 since it was created
+                // an upsert that added the object - it was created
                 code = 201;
+                hookEvt = SIS.EVENT_INSERT;
             }
         }
         result = self._convertToResponseObject(req, result);
         self.sendObject(res, code, result, req.params.isBulk);
         // dispatch hooks
         var hookType = self.getType(req);
-        var hookEvt = SIS.METHODS_TO_EVENT[req.method];
         if (self.hm && req.method in SIS.METHODS_TO_EVENT) {
             var toSend = orig;
             if (req.params.isBulk) {

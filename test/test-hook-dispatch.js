@@ -426,6 +426,25 @@ describe("Hook Dispatch", function() {
             should.not.exist(p.post.old_value);
         });
 
+        it("sends an entity an upsert added as an insert", async function() {
+            // num 3 keeps it out of the bulk tests below
+            var p = await payloadsOf(ApiServer.put(url + "/u1").query({ upsert : true })
+                                     .send({ name : "u1", num : 3 }).expect(201));
+            common(p.post, SIS.EVENT_INSERT, false);
+            p.post.data.should.eql(p.res);
+            should.not.exist(p.post.old_value);
+            JSON.parse(p.get.data).should.eql(p.res);
+            p.get.event.should.eql(SIS.EVENT_INSERT);
+        });
+
+        it("sends an entity an upsert updated as an update", async function() {
+            var p = await payloadsOf(ApiServer.put(url + "/u1").query({ upsert : true })
+                                     .send({ name : "u1", num : 4 }).expect(200));
+            common(p.post, SIS.EVENT_UPDATE, false);
+            p.post.data.should.eql(p.res);
+            p.post.old_value.num.should.eql(3);
+        });
+
         it("sends the added entities of a bulk add", async function() {
             var p = await payloadsOf(ApiServer.post(url).send([{ name : "b1", num : 1 }, { name : "b2", num : 1 }])
                                      .expect(200));
