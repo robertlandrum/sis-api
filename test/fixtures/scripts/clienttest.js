@@ -13,6 +13,8 @@ if (req.path === "/get") {
     hosts.get(req.query.name).then(function(host) { res.json(host); }, fail);
 } else if (req.path === "/list") {
     hosts.listAll({ q : { env : req.query.env }, sort : "name" }).then(function(list) { res.json(list); }, fail);
+} else if (req.path === "/badquery") {
+    hosts.listAll({ q : "notjson" }).then(function(list) { res.json(list); }, fail);
 } else if (req.path === "/schema") {
     Promise.all([client.schemas.get("test_ep_client_hosts"),
                  client.schemas.listAll({ q : { name : "test_ep_client_hosts" } })])

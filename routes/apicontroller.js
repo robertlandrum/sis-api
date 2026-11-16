@@ -179,6 +179,16 @@ class ApiController {
         }
     }
 
+    // parseQuery, but send a 400 and return null if q is not a JSON object
+    _parseValidQuery(req, res) {
+        var rq = this.parseQuery(req);
+        if (rq.query === webUtil.ERROR_QUERY) {
+            this.sendError(res, webUtil.invalidQueryError());
+            return null;
+        }
+        return rq;
+    }
+
     // Returns true if the request wants sub-documents populated
     parsePopulate(req) {
         return webUtil.parsePopulate(req.query);
@@ -188,9 +198,8 @@ class ApiController {
     getAll(req, res) {
         var self = this;
         self.applyDefaults(req);
-        var rq = self.parseQuery(req);
-        if (rq.query === webUtil.ERROR_QUERY) {
-            self.sendError(res, SIS.ERR_BAD_REQ("Query parameter is invalid.  Must be JSON"));
+        var rq = self._parseValidQuery(req, res);
+        if (!rq) {
             return;
         }
         var options = self._getReqOptions(req);
@@ -265,7 +274,10 @@ class ApiController {
         } else {
             // bulk delete - query is required
             req.params.isBulk = true;
-            var rq = self.parseQuery(req);
+            var rq = self._parseValidQuery(req, res);
+            if (!rq) {
+                return;
+            }
             var condition = rq.query;
             if (!condition || !Object.keys(condition).length) {
                 self.sendError(res, SIS.ERR_BAD_REQ("Bulk delete requires a non empty query."));
@@ -300,7 +312,10 @@ class ApiController {
             if (typeof obj !== "object") {
                 return self.sendError(res, SIS.ERR_BAD_REQ("Bulk update requires array or object as body"));
             }
-            var rq = self.parseQuery(req);
+            var rq = self._parseValidQuery(req, res);
+            if (!rq) {
+                return;
+            }
             var condition = rq.query;
             if (!condition || !Object.keys(condition).length) {
                 return self.sendError(res, SIS.ERR_BAD_REQ("A valid query is required"));
@@ -458,7 +473,10 @@ class ApiController {
             req.params.isCommitApi = true;
             var type = this.getType(req);
             var id = req.params.id;
-            var rq = this.parseQuery(req);
+            var rq = this._parseValidQuery(req, res);
+            if (!rq) {
+                return;
+            }
             var mongooseModel = this.commitManager.model;
 
             // update the query for the right types

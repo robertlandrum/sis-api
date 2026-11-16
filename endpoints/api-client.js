@@ -13,6 +13,9 @@ function GenericEp(manager) {
     this.listAll = function(query) {
         query = query || { };
         var rq = webUtil.parseQuery(query, '1.1', false);
+        if (rq.query === webUtil.ERROR_QUERY) {
+            return Promise.reject(webUtil.invalidQueryError());
+        }
         var lean = true;
         var options = { read : "nearest" };
         if (rq.sort) { options.sort = rq.sort; }
@@ -81,6 +84,9 @@ function EntityEp(name, schemaManager) {
     this.listAll = function(query) {
         query = query || { };
         var rq = webUtil.parseQuery(query, '1.1', false);
+        if (rq.query === webUtil.ERROR_QUERY) {
+            return Promise.reject(webUtil.invalidQueryError());
+        }
         var populate = webUtil.parsePopulate(query);
         var lean = false;
         return getManager().then(function(mgr) {

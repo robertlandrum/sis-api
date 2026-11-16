@@ -516,9 +516,16 @@ module.exports.parsePopulate = function(reqQuery) {
     }
 };
 
-var ERROR_QUERY = {};
+// The query parseQuery returns when q is not a JSON object.  Frozen: it is
+// shared by every such request, so nothing may add a condition to it.
+var ERROR_QUERY = Object.freeze({});
 
 module.exports.ERROR_QUERY = ERROR_QUERY;
+
+// The error to send for a query parseQuery returned ERROR_QUERY for
+module.exports.invalidQueryError = function() {
+    return SIS.ERR_BAD_REQ("Query parameter is invalid.  Must be JSON");
+};
 
 module.exports.parseQuery = function(reqQuery, version, enforceLimit) {
     var query = reqQuery.q || { };

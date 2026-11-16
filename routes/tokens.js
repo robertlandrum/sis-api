@@ -2,7 +2,7 @@
 
 var ApiController = require("./apicontroller");
 var SIS = require("../util/constants");
-var passport = require("passport");
+var webUtil = require("./webutil");
 
 var fixBody = function(req) {
     if (req.method == "PUT" || req.method == "POST") {
@@ -33,8 +33,11 @@ class TokenController extends ApiController {
     // Append the query parameter to be that of the user
     applyDefaults(req) {
         if (req.method == "GET" && req[SIS.FIELD_TOKEN_USER]) {
-            var rq = this.parseQuery(req);
-            var query = rq.query;
+            var query = this.parseQuery(req).query;
+            if (query === webUtil.ERROR_QUERY) {
+                // left for getAll to reject
+                return;
+            }
             query[SIS.FIELD_USERNAME] = req.params.uid;
             req.query.q = query;
         }

@@ -245,6 +245,11 @@ describe("@API @V1.1API - Scripts API", function() {
             res.body.map(function(h) { return h.name; }).should.eql(["h1", "h3"]);
         });
 
+        it("Should reject an invalid query", async function() {
+            let res = await get("/badquery").expect(400);
+            res.body.error.should.match(/Query parameter is invalid/);
+        });
+
         it("Should get schemas", async function() {
             let res = await get("/schema").expect(200);
             res.body.get.name.should.eql(schema.name);
