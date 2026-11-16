@@ -3,22 +3,19 @@ describe('User Manager', function() {
 
     var should = require('should');
     var util = require('util');
-    var async = require('async');
 
     var SIS = require("../util/constants");
     var TestUtil = require('./fixtures/util');
     var LocalTest = new TestUtil.LocalTest();
     var schemaManager = null;
 
-    before(function(done) {
-        LocalTest.start(function(err, mongoose) {
-            schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
-            done(err);
-        });
+    before(async function() {
+        var mongoose = await LocalTest.start();
+        schemaManager = require("../util/schema-manager")(mongoose, { auth : true });
     });
 
-    after(function(done) {
-        LocalTest.stop(done);
+    after(async function() {
+        await LocalTest.stop();
     });
 
     var AuthFixture = require("./fixtures/authdata");
@@ -100,59 +97,50 @@ describe('User Manager', function() {
             var usr2 = test[1];
             var pass = test[2];
             var testName = util.format("%s %s add %s", usr, (pass ? "can" : "cannot"), usr2);
-            it(testName, function(done) {
+            it(testName, async function() {
                 var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
                 var u1 = users[usr];
                 var u2 = users[usr2];
-                userManager.add(u2, { user : u1 }).nodeify(function(err, obj) {
-                    if (pass) {
-                        // expect pass..
-                        should.not.exist(err);
-                        should.exist(obj);
-                        obj[SIS.FIELD_NAME].should.eql(u2[SIS.FIELD_NAME]);
-                        // delete the user
-                        userManager.delete(obj[SIS.FIELD_NAME], { user : u1 }).nodeify(done);
-                    } else {
-                        should.exist(err);
-                        done();
-                    }
-                });
+                var added = userManager.add(u2, { user : u1 });
+                if (pass) {
+                    var obj = await added;
+                    should.exist(obj);
+                    obj[SIS.FIELD_NAME].should.eql(u2[SIS.FIELD_NAME]);
+                    // delete the user
+                    await userManager.delete(obj[SIS.FIELD_NAME], { user : u1 });
+                } else {
+                    await should(added).be.rejected();
+                }
             });
         });
 
     });
 
-    var validateUpdate = function(err, obj) {
-        should.not.exist(err);
-        should.exist(obj);
-        obj = obj.updated;
-        should.exist(obj);
-        return obj;
+    // the updated user update resolved with
+    var updatedUser = function(result) {
+        should.exist(result);
+        should.exist(result.updated);
+        return result.updated;
+    };
+
+    // add / delete all the users superman adds
+    var addUsers = function() {
+        var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
+        return Promise.all(superTests.map(function(test) {
+            return userManager.add(users[test[1]], { user : users[test[0]] });
+        }));
+    };
+
+    var deleteUsers = function() {
+        var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
+        return Promise.all(superTests.map(function(test) {
+            return userManager.delete(users[test[1]][SIS.FIELD_NAME], { user : users[test[0]] });
+        }));
     };
 
     describe("user management update fields", function() {
-        // add all users in parallel
-        before(function(done) {
-            async.parallel(superTests.map(function(test) {
-                var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
-                var u1 = users[test[0]];
-                var u2 = users[test[1]];
-                return function(cb) {
-                    userManager.add(u2, { user : u1 }).nodeify(cb);
-                };
-            }), done);
-        });
-        // delete all users in parallel
-        after(function(done) {
-            async.parallel(superTests.map(function(test) {
-                var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
-                var u1 = users[test[0]];
-                var u2 = users[test[1]];
-                return function(cb) {
-                    userManager.delete(u2[SIS.FIELD_NAME], { user : u1 }).nodeify(cb);
-                };
-            }), done);
-        });
+        before(addUsers);
+        after(deleteUsers);
 
         // super users can update fields on anyone
         addTests.map(function(test) {
@@ -164,22 +152,18 @@ describe('User Manager', function() {
                 pass = false;
             }
             var testName = util.format("%s %s update fields for %s", test[0], (test[2] ? "can" : "cannot"), test[1]);
-            it(testName, function(done) {
+            it(testName, async function() {
                 var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
                 // copy u2 to prevent tainting the object
                 var copy = JSON.parse(JSON.stringify(u2));
                 // set the email field
                 copy.email = u1.name + "." + copy.name + "@test.com";
-                userManager.update(copy.name, copy, { user : u1 }).nodeify(function(err, obj) {
-                    if (pass) {
-                        // expect pass..
-                        obj = validateUpdate(err, obj);
-                        obj.email.should.eql(copy.email);
-                    } else {
-                        should.exist(err);
-                    }
-                    done();
-                });
+                var updated = userManager.update(copy.name, copy, { user : u1 });
+                if (pass) {
+                    updatedUser(await updated).email.should.eql(copy.email);
+                } else {
+                    await should(updated).be.rejected();
+                }
             });
         });
 
@@ -187,47 +171,21 @@ describe('User Manager', function() {
         Object.keys(users).map(function(username) {
             // superman wasn't added..
             if (username == "superman") { return; }
-            it(username + " can update fields on itself", function(done) {
+            it(username + " can update fields on itself", async function() {
                 var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
                 var u1 = users[username];
                 var copy = JSON.parse(JSON.stringify(u1));
                 // set the email field
                 copy.email = username + "." + username + "@test.com";
-                userManager.update(copy.name, copy, { user : u1 }).nodeify(function(err, obj) {
-                    // expect pass..
-                    obj = validateUpdate(err, obj);
-                    obj.email.should.eql(copy.email);
-                    done();
-                });
+                updatedUser(await userManager.update(copy.name, copy, { user : u1 })).email.should.eql(copy.email);
             });
         });
 
     });
 
     describe("user management modify roles:", function() {
-        // add all users in parallel
-        before(function(done) {
-            async.parallel(superTests.map(function(test) {
-                var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
-                var u1 = users[test[0]];
-                var u2 = users[test[1]];
-                return function(cb) {
-                    userManager.add(u2, { user : u1 }).nodeify(cb);
-                };
-            }), done);
-        });
-        // delete all users in parallel
-        after(function(done) {
-            async.parallel(superTests.map(function(test) {
-                var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
-                var u1 = users[test[0]];
-                var u2 = users[test[1]];
-                return function(cb) {
-                    userManager.delete(u2[SIS.FIELD_NAME], { user : u1 }).nodeify(cb);
-                };
-            }), done);
-        });
-
+        before(addUsers);
+        after(deleteUsers);
 
         updateTests.map(function(test) {
             var pass = test[5];
@@ -241,35 +199,29 @@ describe('User Manager', function() {
                 // u1 can/cannot update u2 to group role
                 testName = util.format("%s %s update %s to %s %s",
                                           u1.name, (pass ? "can" : "cannot"), u2.name, group, role);
-                it(testName, function(done) {
+                it(testName, async function() {
                     var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
                     var oldRoleVal = u2.roles[group];
                     var copy = JSON.parse(JSON.stringify(u2));
                     copy.roles = copy.roles || {};
                     copy.roles[group] = role;
-                    userManager.update(u2.name, copy, { user : u1 }).nodeify(function(err, obj) {
-                        if (pass) {
-                            obj = validateUpdate(err, obj);
-                            obj.roles[group].should.eql(copy.roles[group]);
-                            // revert change
-                            copy.roles[group] = oldRoleVal;
-                            userManager.update(u2.name, copy, { user : u1 }).nodeify(function(err, reverted) {
-                                reverted = validateUpdate(err, reverted);
-                                reverted.roles[group].should.eql(u2.roles[group]);
-                                done();
-                            });
-                        } else {
-                            should.exist(err);
-                            done();
-                        }
-                    });
+                    var updated = userManager.update(u2.name, copy, { user : u1 });
+                    if (!pass) {
+                        await should(updated).be.rejected();
+                        return;
+                    }
+                    updatedUser(await updated).roles[group].should.eql(copy.roles[group]);
+                    // revert change
+                    copy.roles[group] = oldRoleVal;
+                    var reverted = updatedUser(await userManager.update(u2.name, copy, { user : u1 }));
+                    reverted.roles[group].should.eql(u2.roles[group]);
                 });
             } else {
                 // u1 can/canmot add/remove group to u2
                 testName = util.format("%s %s %s %s to %s",
                                           u1.name, (pass ? "can" : "cannot"),
                                           (action == 'a' ? 'add' : 'remove'), group, u2.name);
-                it(testName, function(done) {
+                it(testName, async function() {
                     var userManager = schemaManager.auth[SIS.SCHEMA_USERS];
                     var copy = JSON.parse(JSON.stringify(u2));
                     copy.roles = copy.roles || {};
@@ -278,38 +230,27 @@ describe('User Manager', function() {
                     } else {
                         copy.roles[group] = role;
                     }
-                    userManager.getById(u2.name).done(function(o1) {
-                        userManager.update(u2.name, copy, { user : u1 }).nodeify(function(err, obj) {
-                            if (pass) {
-                                obj = validateUpdate(err, obj);
-                                if (action == 'd') {
-                                    should.not.exist(obj.roles[group]);
-                                    // revert
-                                    copy.roles[group] = u2.roles[group];
-                                    userManager.update(u2.name, copy, { user : u1 }).nodeify(function(err, reverted) {
-                                        reverted = validateUpdate(err, reverted);
-                                        reverted.roles[group].should.eql(u2.roles[group]);
-                                        done();
-                                    });
-                                } else {
-                                    obj.roles[group].should.eql(role);
-                                    userManager.getById(obj.name).done(function(o) {
-                                        o.toObject().should.eql(obj.toObject());
-                                        // revert
-                                        delete copy.roles[group];
-                                        userManager.update(u2.name, copy, { user : u1 }).nodeify(function(err, reverted) {
-                                            reverted = validateUpdate(err, reverted);
-                                            should.not.exist(reverted.roles[group]);
-                                            done();
-                                        });
-                                    });
-                                }
-                            } else {
-                                should.exist(err);
-                                done();
-                            }
-                        });
-                    });
+                    var updated = userManager.update(u2.name, copy, { user : u1 });
+                    if (!pass) {
+                        await should(updated).be.rejected();
+                        return;
+                    }
+                    var obj = updatedUser(await updated);
+                    var reverted;
+                    if (action == 'd') {
+                        should.not.exist(obj.roles[group]);
+                        // revert
+                        copy.roles[group] = u2.roles[group];
+                        reverted = updatedUser(await userManager.update(u2.name, copy, { user : u1 }));
+                        reverted.roles[group].should.eql(u2.roles[group]);
+                    } else {
+                        obj.roles[group].should.eql(role);
+                        (await userManager.getById(obj.name)).toObject().should.eql(obj.toObject());
+                        // revert
+                        delete copy.roles[group];
+                        reverted = updatedUser(await userManager.update(u2.name, copy, { user : u1 }));
+                        should.not.exist(reverted.roles[group]);
+                    }
                 });
             }
         });
