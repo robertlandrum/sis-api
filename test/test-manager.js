@@ -143,27 +143,17 @@ describe('Manager', function() {
                 .should.eql({ skip : 1, limit : 2, sort : 3, lean : 4, populate : 5, read : 6 });
         });
 
-        it("counts as [count, condition, manager]", async function() {
-            var condition = { num : { $gt : 1 } };
-            var result = await mgr.count(condition);
-            result.length.should.eql(3);
-            result[0].should.eql(1);
-            result[1].should.equal(condition);
-            result[2].should.equal(mgr);
+        it("counts the objects matching the condition", async function() {
+            (await mgr.count({ num : { $gt : 1 } })).should.eql(1);
         });
 
         it("counts everything for an empty condition", async function() {
-            var result = await mgr.count({});
-            result[0].should.eql(2);
+            (await mgr.count({})).should.eql(2);
         });
 
         it("counts 0 when the count fails", async function() {
             var broken = withModel({ countDocuments : rejectingQuery(new Error("db down")) }, { auth : false });
-            var condition = { num : 1 };
-            var result = await broken.count(condition);
-            result[0].should.eql(0);
-            result[1].should.equal(condition);
-            result[2].should.equal(broken);
+            (await broken.count({ num : 1 })).should.eql(0);
         });
     });
 
@@ -444,22 +434,21 @@ describe('Manager', function() {
             await mgr.add(item("a", 1), { user : superUser });
         });
 
-        it("resolves with [old, updated, null]", async function() {
+        it("resolves with { old, updated }", async function() {
             var result = await mgr.update("a", { num : 2 }, { user : admin });
-            result.length.should.eql(3);
-            result[0].num.should.eql(1);
-            result[0].should.not.be.instanceof(Model);
-            result[1].should.be.instanceof(Model);
-            result[1].num.should.eql(2);
-            meta(result[1])._updated_by.should.eql("admin_user");
-            meta(result[1])._created_by.should.eql("super");
-            should(result[2]).be.null();
+            Object.keys(result).should.eql(["old", "updated"]);
+            result.old.num.should.eql(1);
+            result.old.should.not.be.instanceof(Model);
+            result.updated.should.be.instanceof(Model);
+            result.updated.num.should.eql(2);
+            meta(result.updated)._updated_by.should.eql("admin_user");
+            meta(result.updated)._created_by.should.eql("super");
             (await Model.findOne({ name : "a" }).lean()).num.should.eql(2);
         });
 
         it("applies mutable meta fields", async function() {
             var update = { _sis : { tags : ["t1"], owner : ["g1", "g2"] } };
-            var updated = (await mgr.update("a", update, { user : admin }))[1];
+            var updated = (await mgr.update("a", update, { user : admin })).updated;
             meta(updated).tags.should.eql(["t1"]);
             meta(updated).owner.should.eql(["g1", "g2"]);
         });
@@ -502,13 +491,13 @@ describe('Manager', function() {
             };
             var result = await mgr.update("a", { num : 2 }, { user : admin });
             seen.should.eql([1, 2]);
-            result[1].should.eql({ replaced : true });
+            result.updated.should.eql({ replaced : true });
         });
 
         it("updates when the CAS condition matches", async function() {
             var result = await mgr.update("a", { num : 3 }, { user : admin, cas : { num : 1 } });
-            result[0].num.should.eql(1);
-            result[1].num.should.eql(3);
+            result.old.num.should.eql(1);
+            result.updated.num.should.eql(3);
         });
 
         it("rejects when the CAS condition does not match", async function() {
@@ -524,7 +513,7 @@ describe('Manager', function() {
 
         it("casts the CAS condition", async function() {
             var result = await mgr.update("a", { num : 3 }, { user : admin, cas : { num : "1" } });
-            result[1].num.should.eql(3);
+            result.updated.num.should.eql(3);
             await expectError(mgr.update("a", { num : 4 }, { user : admin, cas : { num : "abc" } }), 400);
         });
 
@@ -540,7 +529,7 @@ describe('Manager', function() {
             m.locked.should.eql(true);
             m._created_by.should.eql("super");
             m._updated_by.should.eql("admin_user");
-            m._updated_at.should.be.aboveOrEqual(meta(result[0])._updated_at);
+            m._updated_at.should.be.aboveOrEqual(meta(result.old)._updated_at);
         });
     });
 
@@ -553,14 +542,15 @@ describe('Manager', function() {
 
         it("updates an existing object", async function() {
             var result = await mgr.upsert("a", item("a", 2), { user : admin });
-            result.should.be.instanceof(Array);
-            result[1].num.should.eql(2);
+            result.old.num.should.eql(1);
+            result.updated.num.should.eql(2);
         });
 
-        it("adds a missing object", async function() {
+        it("adds a missing object with no old one", async function() {
             var result = await mgr.upsert("b", item("b", 2), { user : admin });
-            result.should.be.instanceof(Model);
-            result.name.should.eql("b");
+            should(result.old).be.null();
+            result.updated.should.be.instanceof(Model);
+            result.updated.name.should.eql("b");
         });
 
         it("rejects adding with an id other than the one in the path", async function() {
@@ -714,11 +704,11 @@ describe('Manager', function() {
                 return obj.num ? Promise.resolve(obj) : Promise.reject(SIS.ERR_BAD_REQ("zero"));
             };
             var result = await mgr._preSaveBulk([item("a", 1), item("b", 0)]);
-            result.length.should.eql(2);
-            result[0].map(function(s) { return s.name; }).should.eql(["a"]);
-            result[1].length.should.eql(1);
-            result[1][0].value.name.should.eql("b");
-            result[1][0].err[0].should.eql(400);
+            Object.keys(result).should.eql(["success", "errors"]);
+            result.success.map(function(s) { return s.name; }).should.eql(["a"]);
+            result.errors.length.should.eql(1);
+            result.errors[0].value.name.should.eql("b");
+            result.errors[0].err[0].should.eql(400);
         });
     });
 
@@ -729,14 +719,14 @@ describe('Manager', function() {
             await mgr.bulkAdd([item("a", 1), item("b", 1), item("c", 1, ["g3"])], { user : superUser });
         });
 
-        it("updates by query as [old, updated] pairs", async function() {
+        it("updates by query, resolving with what update did", async function() {
             var result = await mgr.bulkUpdateQuery({ "_sis.owner" : "g1" }, { num : 5 }, { user : admin });
             result.errors.should.eql([]);
             result.success.length.should.eql(2);
-            result.success.forEach(function(pair) {
-                pair.length.should.eql(2);
-                pair[0].num.should.eql(1);
-                pair[1].num.should.eql(5);
+            result.success.forEach(function(updated) {
+                Object.keys(updated).should.eql(["old", "updated"]);
+                updated.old.num.should.eql(1);
+                updated.updated.num.should.eql(5);
             });
         });
 
@@ -753,12 +743,12 @@ describe('Manager', function() {
             result.should.eql({ success : [], errors : [] });
         });
 
-        it("updates by array as [old, updated] pairs", async function() {
+        it("updates by array, resolving with what update did", async function() {
             var result = await mgr.bulkUpdateArray([{ name : "a", num : 6 }, { name : "b", num : 7 }],
                                                    { user : admin });
             result.errors.should.eql([]);
-            result.success.map(function(pair) { return [pair.length, pair[0].num, pair[1].num]; })
-                .sort().should.eql([[2, 1, 6], [2, 1, 7]]);
+            result.success.map(function(updated) { return [updated.old.num, updated.updated.num]; })
+                .sort().should.eql([[1, 6], [1, 7]]);
         });
 
         it("updates by array and reports the failures", async function() {

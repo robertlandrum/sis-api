@@ -98,7 +98,9 @@ When a hook triggers, it calls out to the service specified in `target.url` with
     // the entity type that the event occurred on
     "entity_type" : "String",
 
-    // the event that occurred.  One of "update", "insert", or "delete"
+    // the event that occurred.  One of "update", "insert", or "delete".
+    // An upsert (PUT with upsert=true) sends "insert" when it creates the
+    // object and "update" when the object already existed
     "event" : "String",
 
     // the entity data.  If the event is insert or delete, it represents

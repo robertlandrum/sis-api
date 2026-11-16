@@ -140,11 +140,13 @@ bootstrap the first superuser, since the REST API requires an existing privilege
   arrow callbacks instead of `var self = this`, and take no callbacks. The routes
   (`routes/`) and `endpoints/` still use promise chains. Write new code the converted way
   and cover it in the style of `test/test-manager.js` (`async` mocha tests, with
-  `TestUtil.expectError` for SIS error tuples).
+  `TestUtil.expectError` for SIS error tuples). Results with more than one part are
+  named objects, not arrays: `update`/`upsert` resolve with `{ old, updated }` (`old`
+  is null when an upsert added the object), and bulk operations with
+  `{ success, errors }`.
 - Promises are **native** (`Promise`). The small `util/promises.js` helper provides the
   idioms the code still leans on: `defer()` (replaces the old `BPromise.pending()`),
-  `nodeify(promise, cb)`, `spread(fn)` (use `.then(P.spread(fn))`), and `tap(fn)`
-  (`.then(P.tap(fn))`). When a promise chain needs `this`, capture `var self = this;`
+  `nodeify(promise, cb)` and `tap(fn)` (`.then(P.tap(fn))`). When a promise chain needs `this`, capture `var self = this;`
   and reference `self` inside callbacks (there is no bluebird `.bind(this)` anymore);
   bare method references passed to `.then` must be `.bind(self)`.
 - Mongoose 8 notes that bit during the upgrade and are worth remembering: query/model

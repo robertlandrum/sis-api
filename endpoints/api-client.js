@@ -1,7 +1,6 @@
 "use strict";
 
 var webUtil = require("../routes/webutil");
-var P = require("../util/promises");
 var createEntityManager = require("../util/entity-manager");
 var _ = require("lodash");
 
@@ -80,25 +79,25 @@ function EntityEp(name, schemaManager) {
         var lean = false;
         return getManager().then(function(mgr) {
             lean = mgr.model.schema._sis_defaultpaths.length === 0;
-            return webUtil.flattenCondition(rq.query, schemaManager, mgr);
-        }).then(P.spread(function(flattenedCondition, mgr) {
-            var options = { read: "nearest" };
-            if (rq.sort) { options.sort = rq.sort; }
-            if (rq.limit) { options.limit = rq.limit; }
-            if (rq.offset) { options.skip = rq.offset; }
-            options.lean = lean;
-            if (populate) {
-                return mgr.getPopulateFields(schemaManager, populate)
-                .then(function(fields) {
-                    if (fields) {
-                        options.populate = fields;
-                    }
+            return webUtil.flattenCondition(rq.query, schemaManager, mgr).then(function(flattenedCondition) {
+                var options = { read: "nearest" };
+                if (rq.sort) { options.sort = rq.sort; }
+                if (rq.limit) { options.limit = rq.limit; }
+                if (rq.offset) { options.skip = rq.offset; }
+                options.lean = lean;
+                if (populate) {
+                    return mgr.getPopulateFields(schemaManager, populate)
+                    .then(function(fields) {
+                        if (fields) {
+                            options.populate = fields;
+                        }
+                        return mgr.getAll(flattenedCondition, options, rq.fields);
+                    });
+                } else {
                     return mgr.getAll(flattenedCondition, options, rq.fields);
-                });
-            } else {
-                return mgr.getAll(flattenedCondition, options, rq.fields);
-            }
-        })).then(function(result) {
+                }
+            });
+        }).then(function(result) {
             if (!lean) {
                 result = result.map(function(o) { return o.toObject(); });
             }

@@ -203,28 +203,27 @@ ApiController.prototype.getAll = function(req, res) {
     var fields = rq.fields;
     var condition = rq.query;
     var p = self.getManager(req).then(function(mgr) {
-        return webUtil.flattenCondition(condition,self.sm,mgr);
-    }).then(P.spread(function(flattenedCondition, mgr) {
-        return mgr.count(flattenedCondition);
-    })).then(P.spread(function(c, flattenedCondition, mgr) {
-        c = c || 0;
-        res.setHeader(SIS.HEADER_TOTAL_COUNT, c);
-        if (!c || c < options.offset) {
-            return Promise.resolve([]);
-        }
-        options.lean = req.useLean;
-        var populate = self.parsePopulate(req);
-        if (populate) {
-            return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
-                if (populateFields) {
-                    options.populate = populateFields;
+        return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+            return mgr.count(flattenedCondition).then(function(c) {
+                res.setHeader(SIS.HEADER_TOTAL_COUNT, c);
+                if (!c || c <= options.skip) {
+                    return [];
                 }
-                return mgr.getAll(flattenedCondition, options, fields);
+                options.lean = req.useLean;
+                var populate = self.parsePopulate(req);
+                if (populate) {
+                    return mgr.getPopulateFields(self.sm, populate).then(function(populateFields) {
+                        if (populateFields) {
+                            options.populate = populateFields;
+                        }
+                        return mgr.getAll(flattenedCondition, options, fields);
+                    });
+                } else {
+                    return mgr.getAll(flattenedCondition, options, fields);
+                }
             });
-        } else {
-            return mgr.getAll(flattenedCondition, options, fields);
-        }
-    }));
+        });
+    });
     self._finish(req, res, p, 200);
 };
 
@@ -274,11 +273,11 @@ ApiController.prototype.delete = function(req, res) {
             return;
         }
         p = self.getManager(req).then(function(mgr) {
-            return webUtil.flattenCondition(condition,self.sm,mgr);
-        }).then(P.spread(function(flattenedCondition, mgr) {
-            // delegate to mgr
-            return mgr.bulkDelete(flattenedCondition, options);
-        }));
+            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+                // delegate to mgr
+                return mgr.bulkDelete(flattenedCondition, options);
+            });
+        });
         self._finish(req, res, p, 200);
     }
 };
@@ -311,10 +310,10 @@ ApiController.prototype.bulkUpdate = function(req, res) {
             return self.sendError(res, SIS.ERR_BAD_REQ("Body should not be empty"));
         }
         p = self.getManager(req).then(function(mgr) {
-            return webUtil.flattenCondition(condition,self.sm, mgr);
-        }).then(P.spread(function(flattenedCondition, mgr) {
-            return mgr.bulkUpdateQuery(flattenedCondition, obj, options);
-        }));
+            return webUtil.flattenCondition(condition, self.sm, mgr).then(function(flattenedCondition) {
+                return mgr.bulkUpdateQuery(flattenedCondition, obj, options);
+            });
+        });
     }
     return self._finish(req, res, p, 200);
 };
@@ -525,7 +524,7 @@ ApiController.prototype._convertToResponseObject = function(req, obj) {
         obj.success = obj.success.map(function(o) {
             if (req.method == SIS.METHOD_PUT) {
                 // get the update value
-                o = o[1];
+                o = o.updated;
             }
             o = self.convertToResponseObject(req, o);
             return o;
@@ -548,26 +547,27 @@ ApiController.prototype._getSendCallback = function(req, res, code) {
     var self = this;
     return function(err, result) {
         if (err) { return self.sendError(res, err); }
-        var orig = result;
+        // hooks get the object - and the old one for an update
+        var toSend = result;
+        var hookEvt = SIS.METHODS_TO_EVENT[req.method];
         if (!req.params.isBulk &&
             req.method == SIS.METHOD_PUT && req.params.id) {
-            // update.. grab the second obj
-            if (result instanceof Array) {
-                result = result[1];
-            } else if (self.parseUpsert(req)) {
-                // code becomes 201 since it was created
+            if (!result.old) {
+                // an upsert that added the object - it was created
                 code = 201;
+                hookEvt = SIS.EVENT_INSERT;
+                toSend = result.updated;
             }
+            result = result.updated;
         }
         result = self._convertToResponseObject(req, result);
         self.sendObject(res, code, result, req.params.isBulk);
         // dispatch hooks
         var hookType = self.getType(req);
-        var hookEvt = SIS.METHODS_TO_EVENT[req.method];
         if (self.hm && req.method in SIS.METHODS_TO_EVENT) {
-            var toSend = orig;
             if (req.params.isBulk) {
-                toSend = orig.success;
+                // the objects as sent in the response
+                toSend = result.success;
             }
             self.hm.dispatchHooks(toSend, hookType, hookEvt, req.params.isBulk);
         }
@@ -579,15 +579,9 @@ ApiController.prototype._saveSingleCommit = function(req, result) {
     var now = null;
     switch (req.method) {
         case SIS.METHOD_PUT:
-            // might be an upsert
-            if (!(result instanceof Array) &&
-                req.query.upsert) {
-                now = result;
-                break;
-            }
-            // update.. result is an array
-            old = result[0];
-            now = result[1];
+            // an update - old is null if an upsert added the object
+            old = result.old;
+            now = result.updated;
             break;
         case SIS.METHOD_POST:
             // add

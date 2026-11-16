@@ -76,8 +76,8 @@ function CommitManager(schemaManager) {
         return doc;
     }
 
-    // Record the commits of a bulk operation.  For updates, items are
-    // [old, updated] pairs.  Resolves with items.
+    // Record the commits of a bulk operation.  For updates, items are what
+    // update resolved with ({ old, updated }).  Resolves with items.
     this.recordHistoryBulk = async function(items, user, action, type) {
         var ts = Date.now();
         var commits = [];
@@ -92,7 +92,7 @@ function CommitManager(schemaManager) {
             });
         } else {
             commits = items.map(function(item) {
-                return createCommitObject(item[0], item[1], user, type, ts);
+                return createCommitObject(item.old, item.updated, user, type, ts);
             }).filter(function(item) {
                 return item !== null;
             });

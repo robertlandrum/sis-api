@@ -125,8 +125,7 @@ describe('User Manager', function() {
     var validateUpdate = function(err, obj) {
         should.not.exist(err);
         should.exist(obj);
-        obj.should.be.instanceof(Array);
-        obj = obj[1];
+        obj = obj.updated;
         should.exist(obj);
         return obj;
     };

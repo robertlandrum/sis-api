@@ -111,7 +111,7 @@ Manager.prototype.getAll = async function(condition, options, fields) {
 };
 
 // Count the number of objects specified by the query
-// Resolves with [count, condition, manager] - a failed count is 0.
+// Resolves with the count - a failed count is 0.
 Manager.prototype.count = async function(condition) {
     var count = 0;
     try {
@@ -119,7 +119,7 @@ Manager.prototype.count = async function(condition) {
     } catch (err) {
         count = 0;
     }
-    return [count, condition, this];
+    return count;
 };
 
 // Resolves with the space separated paths to populate, or null if there
@@ -253,12 +253,12 @@ Manager.prototype.bulkAdd = async function(items, options) {
     }));
 
     var preSaved = await this._preSaveBulk(authorized);
-    memo.errors.push.apply(memo.errors, preSaved[1]);
+    memo.errors.push.apply(memo.errors, preSaved.errors);
 
     // validate against the model and queue the inserts
     var toAdd = [];
     var batch = this.model.collection.initializeUnorderedBulkOp();
-    await Promise.all(preSaved[0].map(async (res, idx) => {
+    await Promise.all(preSaved.success.map(async (res, idx) => {
         var doc = new this.model(res);
         try {
             await doc.validate();
@@ -340,7 +340,7 @@ Manager.prototype._bulkAddFailed = async function(memo, toAdd, transactionCond, 
 };
 
 // Update the object with the given id using saveFunc to persist it.
-// Resolves with [old, updated, null] where old is the object before the
+// Resolves with { old, updated } where old is the object before the
 // update (a plain object) and updated is what saveFunc and finishUpdate
 // resolved with.
 Manager.prototype._update = async function(id, obj, options, saveFunc) {
@@ -391,7 +391,7 @@ Manager.prototype._update = async function(id, obj, options, saveFunc) {
     doc = await this._preSave(doc);
     var updated = await saveFunc(doc);
     updated = await this.finishUpdate(oldV11, updated);
-    return [oldV11, updated, null];
+    return { old : oldV11, updated : updated };
 };
 
 Manager.prototype.finishUpdate = async function(old, updated) {
@@ -425,8 +425,8 @@ Manager.prototype.canInsertWithId = function(id, obj) {
     return obj[this.idField] == id;
 };
 
-// Update the object if it exists, otherwise add it.  Resolves with what
-// update or add resolved with.
+// Update the object if it exists, otherwise add it.  Resolves with
+// { old, updated } like update - old is null when the object was added.
 Manager.prototype.upsert = async function(id, obj, options) {
     options = this._getDefaultOptions(options);
     try {
@@ -435,12 +435,13 @@ Manager.prototype.upsert = async function(id, obj, options) {
         if (!this.canInsertWithId(id, obj)) {
             throw SIS.ERR_BAD_REQ("Cannot insert object with specified ID");
         }
-        return this.add(obj, options);
+        return { old : null, updated : await this.add(obj, options) };
     }
     return this.update(id, obj, options);
 };
 
-// Ensures the user can update the object and then update it
+// Ensures the user can update the object and then update it.
+// Resolves with { old, updated } (see _update).
 Manager.prototype.update = function(id, obj, options) {
     options = this._getDefaultOptions(options);
     var cas = options.cas;
@@ -453,31 +454,31 @@ Manager.prototype.update = function(id, obj, options) {
 };
 
 // Update every object matching condition with obj.  Resolves with
-// { success, errors } where success holds [old, updated] pairs.
+// { success, errors } where success holds what update resolved with.
 // Note bulk updates are horribly inefficient at the moment
 Manager.prototype.bulkUpdateQuery = async function(condition, obj, options) {
     var items = await this.getAll(condition, { lean : true }, this.idField);
-    return this._updateEach(items, function(item) { return [item[this.idField], obj]; }, options);
+    return this._updateEach(items, function() { return obj; }, options);
 };
 
 // Update each object in items, identified by its id field.  Resolves with
-// { success, errors } where success holds [old, updated] pairs.
+// { success, errors } where success holds what update resolved with.
 Manager.prototype.bulkUpdateArray = function(items, options) {
-    return this._updateEach(items, function(item) { return [item[this.idField], item]; }, options);
+    return this._updateEach(items, function(item) { return item; }, options);
 };
 
-// Run update for each item - getUpdate maps an item to [id, obj]
+// Update the object with the id of each item with what getUpdate maps the
+// item to
 Manager.prototype._updateEach = async function(items, getUpdate, options) {
     var memo = { success : [], errors : [] };
     await Promise.all(items.map(async (item) => {
-        var update = getUpdate.call(this, item);
-        if (!update[0]) {
+        var id = item[this.idField];
+        if (!id) {
             memo.errors.push({ err : SIS.ERR_BAD_REQ("Missing ID field in bulk update"), value : item });
             return;
         }
         try {
-            var result = await this.update(update[0], update[1], options);
-            memo.success.push([result[0], result[1]]);
+            memo.success.push(await this.update(id, getUpdate(item), options));
         } catch (err) {
             memo.errors.push({ err : err, value : item });
         }
@@ -722,7 +723,7 @@ Manager.prototype.applyPreSaveFields = function(obj) {
     obj[SIS.FIELD_SIS_META][SIS.FIELD_UPDATED_AT] = Date.now();
 };
 
-// Run _preSave on each object.  Resolves with a two element array:
+// Run _preSave on each object.  Resolves with { success, errors }:
 // the objects that passed, and errors as { err, value }
 Manager.prototype._preSaveBulk = async function(objs) {
     var errors = [];
@@ -734,7 +735,7 @@ Manager.prototype._preSaveBulk = async function(objs) {
             errors.push({ value : obj, err : err });
         }
     }));
-    return [success, errors];
+    return { success : success, errors : errors };
 };
 
 // pre add hook that is called on inserts only

@@ -267,6 +267,30 @@ describe('@API @V1.1API - Schema API', function() {
                     done();
                 });
         });
+        it("sends the count of all the matches with a page of them", async function() {
+            var q = { q : JSON.stringify({ "_sis.owner" : ["sistest_rops"] }) };
+            var res = await ApiServer.get("/api/v1.1/schemas").query(Object.assign({ limit : 1 }, q)).expect(200);
+            res.body.length.should.eql(1);
+            res.headers["x-total-count"].should.eql("2");
+            res = await ApiServer.get("/api/v1.1/schemas").query(Object.assign({ offset : 1 }, q)).expect(200);
+            res.body.length.should.eql(1);
+            res.headers["x-total-count"].should.eql("2");
+        });
+        it("sends no matches for an offset at or past the count", async function() {
+            var q = { q : JSON.stringify({ "_sis.owner" : ["sistest_rops"] }) };
+            for (var offset of [2, 3]) {
+                var res = await ApiServer.get("/api/v1.1/schemas").query(Object.assign({ offset : offset }, q))
+                    .expect(200);
+                res.body.should.eql([]);
+                res.headers["x-total-count"].should.eql("2");
+            }
+        });
+        it("sends a count of 0 when nothing matches", async function() {
+            var res = await ApiServer.get("/api/v1.1/schemas").query({ q : JSON.stringify({ name : "nope" }) })
+                .expect(200);
+            res.body.should.eql([]);
+            res.headers["x-total-count"].should.eql("0");
+        });
         it("Should return s1 and s2 ", function(done) {
             ApiServer.get("/api/v1.1/schemas")
                 .query({q : JSON.stringify({ "_sis.owner" : ["sistest_rops"] }) })
