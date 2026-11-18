@@ -312,7 +312,7 @@ describe('Manager', function() {
         it("rejects updates that move the object out of the user's groups", async function() {
             var merged = new Model(item("a", 1, ["g3"]));
             await expectError(mgr.authorize(SIS.EVENT_UPDATE, item("a", 1), admin, merged),
-                              401, /Insufficient/);
+                              401, /Insufficient permissions on update object/);
         });
 
         it("rejects changing the data of an immutable object", async function() {
