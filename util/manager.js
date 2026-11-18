@@ -248,7 +248,7 @@ class Manager {
             return doc;
         }
         if (!this._canOperate(mergedDoc, user)) {
-            throw SIS.ERR_BAD_CREDS("Insufficient permissisons on update object.");
+            throw SIS.ERR_BAD_CREDS("Insufficient permissions on update object.");
         }
         return mergedDoc;
     }
